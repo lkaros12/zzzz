@@ -1,0 +1,13 @@
+- [HUD 일러스트 투명도 페이드 보류](hud-portrait-fade-deferred.md) — 플레이어는 항상 화면 중앙이라 "겹침" 조건이 발동하지 않음, 플레이 테스트 후 재결정
+- [Unity 에디터 없이 컴파일 검증](unity-offline-compile-check.md) — dotnet + Unity 번들 Roslyn csc 로 MCP 없이 C# 검증하는 절차
+- [perl 로 한글 소스 편집 시 이중 인코딩 함정](perl-utf8-korean-pitfall.md) — 삽입 블록은 raw 바이트로 읽어야 함, 복구 절차 포함
+- [재생 모드 프레임이 안 흐르는 함정](unity-playmode-frame-ticks.md) — execute_code 로 검증할 때 상태 변경과 결과 확인을 따로 호출해야 함
+- [애니메이션 전용 FBX 들여오기](unity-animation-only-fbx.md) — preserveHierarchy 를 안 켜면 클립이 조용히 0개가 됨, 콜라이더 높이 함정 포함
+- [시야 마스크 격자 계단의 원인](vision-mask-angular-cliff.md) — 반지름 softness 는 각도 방향 절벽을 못 고침, 해상도 올리기는 헛수고
+- [씬 재빌드 멈춤 + 실내 NavMesh 함정](unity-scene-rebuild-and-indoor-navmesh.md) — 모달 대화상자로 에디터가 멈추는 조건, 문 인방 높이가 2.05면 실내가 고립됨
+- [캐릭터 대 실내 스케일 함정](unity-character-vs-interior-scale.md) — stepOffset 이 문 인방을 때려 "보이지 않는 벽"이 생김, 보이는 몸/콜라이더 불일치
+- [전투 판정은 시야 검사가 필요](combat-needs-line-of-sight.md) — 거리+각도만 보면 벽을 통과함, 암살·근접·좀비 물기 세 군데 동시에 뚫려 있었음
+- [화면 어둡게 덮는 알파와 sRGB 감마](srgb-gamma-fog-alpha.md) — 선형 0.82 알파는 화면에서 회색, 0.995 부터 검게 보인다 (+ 수동 cam.Render 로는 깊이 셰이더가 사라짐)
+- [좀비 공성(두드리기) 함정 3가지](zombie-siege-pitfalls.md) — 중심점에 몰려 한 마리만 붙음, 실외 좀비가 실내 문을 고름, 문간 안쪽은 카빙에 먹힘
+- [메쉬 예산과 정적 배칭 측정 함정](mesh-budget-and-batching-trap.md) — 블렌더 작업본은 15~40배 무겁게 들어옴, 배칭 때문에 삼각형이 10배 뻥튀기됨, 저폴리 숲 만드는 법
+- [좀비 갱신 등급제와 중력 함정](zombie-update-tiers-gravity-trap.md) — 건너뛴 프레임만큼 낙하가 dt 제곱으로 커져 좀비가 제자리에 붙음, 성능 A/B 측정 오염 주의
