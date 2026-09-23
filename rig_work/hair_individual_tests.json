@@ -1,0 +1,134 @@
+{
+  "HairBack_R2_1": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.03860257555890378
+  },
+  "HairBack_R2_2": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.027121089141635822
+  },
+  "HairBack_R2_3": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.01466780201655289
+  },
+  "HairBack_R1_1": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.039472275446422775
+  },
+  "HairBack_R1_2": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.027541238408486036
+  },
+  "HairBack_R1_3": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.014799304654708263
+  },
+  "HairBack_C_1": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.03863698235764082
+  },
+  "HairBack_C_2": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.026718449853146208
+  },
+  "HairBack_C_3": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.013674272594441393
+  },
+  "HairBack_L1_1": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.03951449698173536
+  },
+  "HairBack_L1_2": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.027580552955019818
+  },
+  "HairBack_L1_3": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.014845857978600715
+  },
+  "HairBack_L2_1": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.03846631968390601
+  },
+  "HairBack_L2_2": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.027137438467462097
+  },
+  "HairBack_L2_3": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.014702282715446739
+  },
+  "HairSide_L_1": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.021751921182532438
+  },
+  "HairSide_L_2": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.01686500937506292
+  },
+  "HairSide_L_3": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.0095880460291315
+  },
+  "HairBang_L_1": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.023240458695465906
+  },
+  "HairBang_L_2": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.01745338745646622
+  },
+  "HairBang_L_3": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.01057819273798737
+  },
+  "HairSide_R_1": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.021951214615205227
+  },
+  "HairSide_R_2": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.016912285564995768
+  },
+  "HairSide_R_3": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.009604198928910613
+  },
+  "HairBang_R_1": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.022008554332655306
+  },
+  "HairBang_R_2": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.01649875530797517
+  },
+  "HairBang_R_3": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.009910860962897682
+  },
+  "HairBang_C_1": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.01636448000155059
+  },
+  "HairBang_C_2": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.009657121090022348
+  },
+  "HairBang_C_3": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.005052303824757813
+  },
+  "HairAhoge_1": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.009631009697153432
+  },
+  "HairAhoge_2": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.006989038093456199
+  },
+  "HairAhoge_3": {
+    "outside_hair_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.004020193093378141
+  }
+}

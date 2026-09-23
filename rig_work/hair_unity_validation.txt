@@ -1,0 +1,2 @@
+Avatar valid=True humanoid=True
+Hair bones=33; importer max weights=8; runtime skinWeights=FourBones

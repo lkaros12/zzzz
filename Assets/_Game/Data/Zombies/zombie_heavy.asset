@@ -1,0 +1,46 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b2fbc9c0de98c2d40a4f1f0274dcc654, type: 3}
+  m_Name: zombie_heavy
+  m_EditorClassIdentifier: Assembly-CSharp::ZombieDefinition
+  id: zombie_heavy
+  displayName: "\uD5E4\uBE44\uC880\uBE44"
+  placeholderColor: {r: 0.3, g: 0.34, b: 0.45, a: 1}
+  placeholderMaterial: {fileID: 2100000, guid: aef9c7319d633d34286a579b2d183b22, type: 2}
+  model: {fileID: 919132149155446097, guid: ab453a6e02d6cac49992731a407314f3, type: 3}
+  animatorController: {fileID: 9100000, guid: c9b95ab2e13ecaf4a9f17ab6263de631, type: 2}
+  bodyHeight: 1.6
+  bodyRadius: 0.3
+  modelScale: 1.6015759
+  deathLinger: 1.1
+  maxHealth: 220
+  moveSpeed: 1.5
+  damageMin: 15
+  damageMax: 25
+  blockImpact: 1.5
+  heavySwingChance: 0.25
+  heavySwingDamageMultiplier: 1.6
+  heavySwingBlockImpact: 0.7
+  immuneToKnockback: 1
+  visionRange: 16
+  visionHalfAngle: 55
+  canBeAssassinated: 0
+  canCharge: 1
+  chargeTriggerRange: 8
+  chargeWindup: 0.9
+  chargeSpeed: 11
+  chargeDistance: 6.5
+  chargeRecovery: 2
+  chargeCooldown: 20
+  chargeBlockImpact: 1.5
+  chargeDamageMin: 30
+  chargeDamageMax: 45

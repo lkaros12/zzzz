@@ -1,0 +1,26 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 31e0ef37acb57c7438effaa00871b62b, type: 3}
+  m_Name: bandage
+  m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  id: bandage
+  displayName: "\uBD95\uB300"
+  placeholderColor: {r: 0.95, g: 0.95, b: 0.9, a: 1}
+  placeholderMaterial: {fileID: 2100000, guid: 0083d7ee2d9a15a48b339406212e8956, type: 2}
+  gridSize: {x: 1, y: 1}
+  maxStack: 10
+  usable: 1
+  hungerRestore: 0
+  thirstRestore: 0
+  fatigueRestore: 0
+  hpRestore: 12
+  treatUpTo: 2

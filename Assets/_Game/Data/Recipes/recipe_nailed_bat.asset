@@ -1,0 +1,19 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f4698ae97805f3f4787f303a1a5b8e64, type: 3}
+  m_Name: recipe_nailed_bat
+  m_EditorClassIdentifier: Assembly-CSharp::CraftRecipe
+  baseWeapon: {fileID: 11400000, guid: 82ec03dc6e63fe240834694cd112d161, type: 2}
+  material: {fileID: 11400000, guid: 52c4d73f6dd8378498e3440dd030330a, type: 2}
+  result: {fileID: 11400000, guid: 0cec2a9fc978f72408cf5f2fe83d49eb, type: 2}
+  materialCount: 5
+  repairPerMaterial: 10

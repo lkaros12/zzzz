@@ -1,0 +1,34 @@
+{
+  "original": {
+    "vertices": 81115,
+    "polygons": 66299,
+    "coords": "948aa10bb1efab7cae24c0720be3a6e5ccd5a037eb5df2a35c1d66855d7537c4",
+    "topology": "d4df3b07c2747a1a6c1ce62b3852bcebd878381c83c72b20ffd8c3585774bace",
+    "uv": [
+      [
+        "Attribute",
+        "c804e33e58b9e462bea15f7193d37a8d589ab5961c40e65e835ae1ea6b18b84a"
+      ]
+    ],
+    "materials": [
+      "material_0"
+    ]
+  },
+  "repaired": {
+    "vertices": 81115,
+    "polygons": 66299,
+    "coords": "948aa10bb1efab7cae24c0720be3a6e5ccd5a037eb5df2a35c1d66855d7537c4",
+    "topology": "d4df3b07c2747a1a6c1ce62b3852bcebd878381c83c72b20ffd8c3585774bace",
+    "uv": [
+      [
+        "Attribute",
+        "c804e33e58b9e462bea15f7193d37a8d589ab5961c40e65e835ae1ea6b18b84a"
+      ]
+    ],
+    "materials": [
+      "material_0"
+    ]
+  },
+  "geometry_topology_uv_materials_identical": true,
+  "symmetry_max_error": 2.9802322387695312e-08
+}

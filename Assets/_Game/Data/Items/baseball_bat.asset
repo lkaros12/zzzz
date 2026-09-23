@@ -1,0 +1,44 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 31e0ef37acb57c7438effaa00871b62b, type: 3}
+  m_Name: baseball_bat
+  m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  id: baseball_bat
+  displayName: "\uC57C\uAD6C\uBC29\uB9DD\uC774"
+  placeholderColor: {r: 0.66, g: 0.48, b: 0.26, a: 1}
+  placeholderMaterial: {fileID: 2100000, guid: c3f8c406931c57c4a9f2b18fca83d276, type: 2}
+  gridSize: {x: 1, y: 4}
+  maxStack: 1
+  usable: 0
+  hungerRestore: 0
+  thirstRestore: 0
+  fatigueRestore: 0
+  hpRestore: 0
+  treatUpTo: 0
+  equipSlot: 5
+  defense: 0
+  moveSpeedMultiplier: 0.97
+  staminaCostMultiplier: 1.04
+  injuryChanceMultiplier: 1
+  attackDamage: 26
+  attackRange: 2.2
+  attackInterval: 0.95
+  attackStaminaCost: 16
+  handedness: 2
+  maxTargets: 3
+  knockback: 1.4
+  staggerDuration: 0.6
+  noise: 10
+  isShield: 0
+  ranged: 0
+  attackSpread: 0
+  maxDurability: 120

@@ -1,0 +1,12 @@
+{
+  "toes": {
+    "finite": true,
+    "edge_stretch_p99": 1.0000024608577953,
+    "max_displacement": 0.023153843050644992
+  },
+  "wrists": {
+    "finite": true,
+    "edge_stretch_p99": 1.022984895958178,
+    "max_displacement": 0.06033577117200073
+  }
+}

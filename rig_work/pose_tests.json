@@ -1,0 +1,44 @@
+{
+  "neutral": {
+    "finite": true,
+    "edge_stretch_p99": 1.0000012618360041,
+    "max_displacement": 9.071674691055656e-08
+  },
+  "arms": {
+    "finite": true,
+    "edge_stretch_p99": 1.2060527711066644,
+    "max_displacement": 0.21844922664615693,
+    "upper_head_drift": 0.0
+  },
+  "elbows": {
+    "finite": true,
+    "edge_stretch_p99": 1.3553047611219267,
+    "max_displacement": 0.29956223244512387,
+    "upper_head_drift": 0.0
+  },
+  "legs": {
+    "finite": true,
+    "edge_stretch_p99": 1.1751367122178784,
+    "max_displacement": 0.2319723015954004
+  },
+  "torso": {
+    "finite": true,
+    "edge_stretch_p99": 1.0276621405495407,
+    "max_displacement": 0.2185347974910595
+  },
+  "neck": {
+    "finite": true,
+    "edge_stretch_p99": 1.0856495004818523,
+    "max_displacement": 0.15329411139429916
+  },
+  "head": {
+    "finite": true,
+    "edge_stretch_p99": 1.4610834923101523,
+    "max_displacement": 0.16628262012681483
+  },
+  "combined": {
+    "finite": true,
+    "edge_stretch_p99": 1.4578431939902645,
+    "max_displacement": 0.2947341959669828
+  }
+}

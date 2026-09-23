@@ -1,0 +1,23 @@
+Avatar valid=True humanoid=True
+Hips=Hips
+LeftUpperLeg=LeftUpLeg
+RightUpperLeg=RightUpLeg
+LeftLowerLeg=LeftLeg
+RightLowerLeg=RightLeg
+LeftFoot=LeftFoot
+RightFoot=RightFoot
+Spine=Spine
+Chest=Spine1
+Neck=Neck
+Head=Head
+LeftShoulder=LeftShoulder
+RightShoulder=RightShoulder
+LeftUpperArm=LeftArm
+RightUpperArm=RightArm
+LeftLowerArm=LeftForeArm
+RightLowerArm=RightForeArm
+LeftHand=LeftHand
+RightHand=RightHand
+UpperChest=Spine2
+LeftToes=LeftToeBase
+RightToes=RightToeBase

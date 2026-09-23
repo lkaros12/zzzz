@@ -1,0 +1,47 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 31e0ef37acb57c7438effaa00871b62b, type: 3}
+  m_Name: rifle
+  m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  id: rifle
+  displayName: "\uC18C\uCD1D"
+  placeholderColor: {r: 0.36, g: 0.4, b: 0.3, a: 1}
+  placeholderMaterial: {fileID: 2100000, guid: 8b0778b5024f89e48b1d5d796ea47638, type: 2}
+  gridSize: {x: 2, y: 4}
+  maxStack: 1
+  usable: 0
+  hungerRestore: 0
+  thirstRestore: 0
+  fatigueRestore: 0
+  hpRestore: 0
+  treatUpTo: 0
+  equipSlot: 5
+  defense: 0
+  moveSpeedMultiplier: 0.96
+  staminaCostMultiplier: 1.04
+  injuryChanceMultiplier: 1
+  attackDamage: 45
+  attackRange: 88
+  attackInterval: 0.8
+  attackStaminaCost: 0
+  handedness: 2
+  maxTargets: 1
+  knockback: 0.4
+  staggerDuration: 0.3
+  noise: 75
+  isShield: 0
+  ranged: 1
+  attackSpread: 1.5
+  ammoId: ammo_rifle
+  magazineSize: 10
+  reloadTime: 2
+  maxDurability: 220

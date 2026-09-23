@@ -1,0 +1,47 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 31e0ef37acb57c7438effaa00871b62b, type: 3}
+  m_Name: ammo_rifle
+  m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  id: ammo_rifle
+  displayName: "\uC18C\uCD1D\uD0C4"
+  placeholderColor: {r: 0.6, g: 0.62, b: 0.35, a: 1}
+  placeholderMaterial: {fileID: 2100000, guid: 6206efa4206fb564f8c9537d4ed9a0a8, type: 2}
+  gridSize: {x: 1, y: 1}
+  maxStack: 50
+  usable: 0
+  hungerRestore: 0
+  thirstRestore: 0
+  fatigueRestore: 0
+  hpRestore: 0
+  treatUpTo: 0
+  equipSlot: 0
+  defense: 0
+  moveSpeedMultiplier: 1
+  staminaCostMultiplier: 1
+  injuryChanceMultiplier: 1
+  attackDamage: 0
+  attackRange: 1.6
+  attackInterval: 0.8
+  attackStaminaCost: 10
+  handedness: 0
+  maxTargets: 1
+  knockback: 0
+  staggerDuration: 0
+  noise: 0
+  isShield: 0
+  ranged: 0
+  attackSpread: 0
+  ammoId: 
+  magazineSize: 0
+  reloadTime: 1.6
+  maxDurability: 0

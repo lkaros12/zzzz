@@ -1,0 +1,37 @@
+{
+  "neutral": {
+    "protected_max_displacement": 6.368503346025481e-08,
+    "unweighted_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 1.2377834115800373e-07,
+    "edge_stretch_p99": 1.0000038699968534,
+    "edge_stretch_max": 1.0004229036162506
+  },
+  "back_sway": {
+    "protected_max_displacement": 6.368503346025481e-08,
+    "unweighted_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.14844518029031464,
+    "edge_stretch_p99": 1.6846100951378553,
+    "edge_stretch_max": 10.326021875686513
+  },
+  "side_sway": {
+    "protected_max_displacement": 6.368503346025481e-08,
+    "unweighted_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.027685200400306607,
+    "edge_stretch_p99": 1.218065689023495,
+    "edge_stretch_max": 7.615668013658812
+  },
+  "bang_lift": {
+    "protected_max_displacement": 6.368503346025481e-08,
+    "unweighted_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.02157661807574101,
+    "edge_stretch_p99": 1.1507735692312846,
+    "edge_stretch_max": 2.734545490200772
+  },
+  "ahoge": {
+    "protected_max_displacement": 6.368503346025481e-08,
+    "unweighted_max_displacement": 9.071674691055656e-08,
+    "hair_max_displacement": 0.026850700030553284,
+    "edge_stretch_p99": 1.000008394312704,
+    "edge_stretch_max": 1.497735697730839
+  }
+}

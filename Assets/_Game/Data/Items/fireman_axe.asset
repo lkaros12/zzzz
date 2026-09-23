@@ -1,0 +1,44 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 31e0ef37acb57c7438effaa00871b62b, type: 3}
+  m_Name: fireman_axe
+  m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  id: fireman_axe
+  displayName: "\uC18C\uBC29\uB3C4\uB07C"
+  placeholderColor: {r: 0.85, g: 0.35, b: 0.18, a: 1}
+  placeholderMaterial: {fileID: 2100000, guid: 70a01e1c8b1d28a4c89872d8fa2ddc36, type: 2}
+  gridSize: {x: 2, y: 4}
+  maxStack: 1
+  usable: 0
+  hungerRestore: 0
+  thirstRestore: 0
+  fatigueRestore: 0
+  hpRestore: 0
+  treatUpTo: 0
+  equipSlot: 5
+  defense: 0
+  moveSpeedMultiplier: 0.94
+  staminaCostMultiplier: 1.06
+  injuryChanceMultiplier: 1
+  attackDamage: 42
+  attackRange: 2.3
+  attackInterval: 1.05
+  attackStaminaCost: 22
+  handedness: 2
+  maxTargets: 4
+  knockback: 1.1
+  staggerDuration: 0.55
+  noise: 15
+  isShield: 0
+  ranged: 0
+  attackSpread: 0
+  maxDurability: 160
