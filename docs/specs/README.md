@@ -6,6 +6,7 @@
 |---|---|---|
 | 01 | 01_roof_and_ceiling_height.md | 승인됨, Codex 한도로 대기 (2026-09-24 12:57 이후) |
 | 02 | 02_tab_ui_bleeding_healing.md | 승인됨, 01 다음 |
+| 03 | 03_hadan_city_pilot.md | 승인됨, 02 다음. 지도 데이터 docs/map/hadan_500m.json |
 
 보내는 법 (저장소 루트에서):
 
