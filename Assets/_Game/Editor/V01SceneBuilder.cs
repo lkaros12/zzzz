@@ -60,8 +60,6 @@ public static class V01SceneBuilder
         CreateLight();
         CreateGround();
         CreateForest(null);
-        CreateObstacles();
-        CreateStairsAndPlatform();
         CreateApartment();
 
         var player = CreatePlayer();
@@ -250,51 +248,6 @@ public static class V01SceneBuilder
     }
 
     /// <summary>
-    /// NavMesh 실험용 계단 + 플랫폼. 플랫폼 위로는 계단으로만 올라갈 수 있어서,
-    /// 직선 추적만 하는 좀비는 플랫폼 벽에 붙어 버린다 — NavMesh 가 실제로 필요한 상황을 만든다.
-    /// </summary>
-    static void CreateStairsAndPlatform()
-    {
-        var root = new GameObject("Stairs").transform;
-        var material = EnsureSharedMaterial("stairs", new Color(0.52f, 0.50f, 0.46f));
-
-        const int stepCount = 8;
-        const float stepRise = 0.25f;   // 한 칸 높이. NavMesh climb 과 stepOffset 보다 낮게
-        const float stepRun = 0.6f;     // 한 칸 깊이
-        const float stepWidth = 3f;
-        float platformHeight = stepCount * stepRise;   // 2m
-
-        // 계단은 -Z 방향으로 올라간다. 플랫폼은 그 끝에 붙는다.
-        var basePosition = new Vector3(-18f, 0f, 16f);
-
-        for (int i = 0; i < stepCount; i++)
-        {
-            var step = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            step.name = "Step_" + i;
-            step.transform.SetParent(root, false);
-
-            // 각 칸은 바닥부터 그 칸 높이까지 채운다 (아래가 비면 NavMesh 가 끊긴다).
-            float height = (i + 1) * stepRise;
-            step.transform.localScale = new Vector3(stepWidth, height, stepRun);
-            step.transform.position = basePosition
-                                      + new Vector3(0f, height * 0.5f, -stepRun * i);
-
-            var renderer = step.GetComponent<Renderer>();
-            if (renderer) renderer.sharedMaterial = material;
-        }
-
-        var platform = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        platform.name = "Platform";
-        platform.transform.SetParent(root, false);
-        platform.transform.localScale = new Vector3(8f, platformHeight, 8f);
-        platform.transform.position = basePosition
-                                      + new Vector3(0f, platformHeight * 0.5f, -stepRun * stepCount - 4f + stepRun * 0.5f);
-
-        var platformRenderer = platform.GetComponent<Renderer>();
-        if (platformRenderer) platformRenderer.sharedMaterial = material;
-    }
-
-    /// <summary>
     /// GDD 17항 추적용 NavMesh. 계단/플랫폼처럼 높이가 바뀌는 지형에서 좀비가
     /// 길을 찾아가려면 구워둔 보행 가능 영역이 필요하다.
     ///
@@ -349,24 +302,6 @@ public static class V01SceneBuilder
         Debug.Log("[V0.1] NavMesh 구움: 정점 " + triangulation.vertices.Length
                   + ", 삼각형 " + triangulation.indices.Length / 3
                   + " (에이전트 반지름 " + AgentRadius().ToString("F2") + "m, 문 제외)");
-    }
-
-    static void CreateObstacles()
-    {
-        var root = new GameObject("Obstacles");
-        Vector3[] spots =
-        {
-            new Vector3(6f, 0.5f, 4f), new Vector3(-5f, 0.5f, 7f), new Vector3(3f, 0.5f, -6f),
-            new Vector3(-8f, 0.5f, -3f), new Vector3(10f, 0.5f, -9f), new Vector3(-2f, 0.5f, 12f),
-        };
-        for (int i = 0; i < spots.Length; i++)
-        {
-            var box = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            box.name = "Obstacle_" + i;
-            box.transform.SetParent(root.transform);
-            box.transform.position = spots[i];
-            box.transform.localScale = new Vector3(2f, 1f, 2f);
-        }
     }
 
     static GameObject CreatePlayer()
@@ -636,7 +571,7 @@ public static class V01SceneBuilder
             new Vector3(6f, 0f, -12f),
             new Vector3(-8f, 0f, -11f),
             new Vector3(3f, 0f, 14f),
-            new Vector3(25f, 0f, 3f),   // 침실 안. 벽 너머 좀비가 안 보이는지 확인용
+            new Vector3(27f, 0f, 5.5f), // 중앙홀 안. 벽 너머 좀비가 안 보이는지 확인용
         };
 
         // 일반 2 / 여성형 2 / 헤비 1 / 실내 1
@@ -658,9 +593,9 @@ public static class V01SceneBuilder
         Vector3[] spots =
         {
             Flat(2.2f, 8.2f) + Vector3.up * BodyY,
-            new Vector3(-14f, 1.05f, -14f),
-            new Vector3(14f, 1.05f, 14f),
-            new Vector3(-14f, 1.05f, 14f),
+            new Vector3(10f, 1.05f, -10f),
+            new Vector3(38f, 1.05f, -10f),
+            new Vector3(-2f, 1.05f, -10f),
         };
 
         var points = new Transform[spots.Length];
@@ -1420,7 +1355,7 @@ public static class V01SceneBuilder
         desk.Add(Find(items, "ammo_pistol"), 24);
 
         // 현관을 지나 들어오면 왼편에 보이는 쓰레기/재활용 자리.
-        var bin = WorldContainer.Spawn("쓰레기봉투", Flat(8.00f, 0.60f), new Vector3(0.50f, 0.55f, 0.50f), wood);
+        var bin = WorldContainer.Spawn("쓰레기봉투", new Vector3(19f, 0f, -10f), new Vector3(0.50f, 0.55f, 0.50f), wood);
         bin.Add(Find(items, "scrap_metal"), 4);
         bin.Add(Find(items, "cloth"), 2);
 
@@ -1430,7 +1365,8 @@ public static class V01SceneBuilder
         crate.Add(Find(items, "steel_pipe"), 1);
         crate.Add(Find(items, "ammo_shotgun"), 10);
 
-        var car = WorldContainer.Spawn("차량", new Vector3(0f, 0f, -14f), new Vector3(2.4f, 1.3f, 4.2f), metal);
+        // 서벽과 1.2m를 비워 두 문 사이 통로를 막지 않는다.
+        var car = WorldContainer.Spawn("차량", new Vector3(5.25f, 0f, -22f), new Vector3(2.4f, 1.3f, 4.2f), metal);
         car.Add(Find(items, "medkit"), 1);
         car.Add(Find(items, "ammo_rifle"), 20);
         car.Add(Find(items, "trashcan_lid"), 1);
@@ -1630,13 +1566,13 @@ public static class V01SceneBuilder
             (new Vector3(1f, 0.2f, 4.5f), 1, 3),
             (new Vector3(-1.5f, 0.2f, -2.5f), 1, 8),
             (new Vector3(4.5f, 0.2f, -1f), 2, 4),
-            (new Vector3(-6f, 0.2f, 5f), 3, 1),
+            (new Vector3(-4.5f, 0.2f, 5f), 3, 1),
             (new Vector3(3.5f, 0.2f, 3f), 4, 1),
             (new Vector3(-4f, 0.2f, -5f), 2, 7),
             (new Vector3(5f, 0.2f, 2.5f), 5, 1),
             (new Vector3(-2.5f, 0.2f, 6.5f), 6, 1),
             (new Vector3(7f, 0.2f, -3f), 7, 1),
-            (new Vector3(-7f, 0.2f, 1f), 8, 1),
+            (new Vector3(-5f, 0.2f, 1f), 8, 1),
             (new Vector3(1.5f, 0.2f, -4f), 9, 1),
         };
 
@@ -2456,28 +2392,6 @@ public static class V01SceneBuilder
 
         var triangulation = UnityEngine.AI.NavMesh.CalculateTriangulation();
         Check(triangulation.indices.Length > 0, "NavMesh 가 구워져 있다 (삼각형 " + triangulation.indices.Length / 3 + ")");
-
-        // 계단으로 플랫폼 위까지 경로가 이어지는지
-        var stairsRoot = GameObject.Find("Stairs");
-        Check(stairsRoot != null, "계단/플랫폼이 씬에 있다");
-        if (stairsRoot)
-        {
-            var platform = stairsRoot.transform.Find("Platform");
-            Check(platform != null, "플랫폼이 있다");
-            if (platform)
-            {
-                Vector3 top = platform.position + Vector3.up * (platform.localScale.y * 0.5f + 0.2f);
-                UnityEngine.AI.NavMeshHit sample;
-                Check(UnityEngine.AI.NavMesh.SamplePosition(top, out sample, 2f, UnityEngine.AI.NavMesh.AllAreas),
-                      "플랫폼 위가 보행 가능 영역이다");
-
-                var navPath = new UnityEngine.AI.NavMeshPath();
-                bool reachable = UnityEngine.AI.NavMesh.CalculatePath(
-                    top, new Vector3(0f, 0.1f, 0f), UnityEngine.AI.NavMesh.AllAreas, navPath);
-                Check(reachable && navPath.status == UnityEngine.AI.NavMeshPathStatus.PathComplete,
-                      "플랫폼 위에서 맵 중앙까지 경로가 이어진다 (계단 연결 확인)");
-            }
-        }
 
         // 좀비가 경로를 쓰는 코드가 남아 있는지
         Check(typeof(Zombie).GetMethod("SteerDirection",
@@ -3664,6 +3578,9 @@ public static class V01SceneBuilder
         Check(Mathf.Abs(living.z - utility.z) < 0.2f, "남쪽 띠 네 방의 깊이가 같다");
         Check(Mathf.Abs(storage.z - dining.z) < 0.2f, "북쪽 띠 네 방의 깊이가 같다");
 
+        CheckEstateLayout(rooms);
+        CheckSpawnClearance();
+
         // 현관에서 각 방까지 실제로 갈 수 있는가.
         //
         // NavMesh 는 문을 빼고 굽지만, 문짝마다 달린 NavMeshObstacle 이 닫혀 있는 동안
@@ -3671,12 +3588,23 @@ public static class V01SceneBuilder
         // 배치가 통행 가능한지 보려면 문짝을 잠깐 빼고 다시 구워서 물어봐야 한다.
         CheckLayoutIsWalkable();
 
-        // 닫힌 문이 실제로 좀비 길찾기를 막는지 (열어야만 들어올 수 있어야 한다).
-        var blocked = new UnityEngine.AI.NavMeshPath();
-        UnityEngine.AI.NavMesh.CalculatePath(Flat(9.37f, -1.2f), Flat(9.37f, 2.0f),
-                                             UnityEngine.AI.NavMesh.AllAreas, blocked);
-        Check(blocked.status != UnityEngine.AI.NavMeshPathStatus.PathComplete,
-              "닫힌 현관문은 좀비 길찾기를 막는다 (NavMeshObstacle 카빙)");
+        // 카빙은 재생 모드에서만 돌아 에디트 모드 경로로는 잴 수 없다.
+        // 재생 모드 실측: 현관문/차고 셔터 닫힘 PathPartial, 현관문 열림 PathComplete.
+        for (int i = 0; i < openings.Length; i++)
+        {
+            var opening = openings[i];
+            if (opening.Vaultable) continue;
+
+            var pane = opening.GetComponentInChildren<Collider>(true);
+            var obstacle = pane ? pane.GetComponent<UnityEngine.AI.NavMeshObstacle>() : null;
+            float obstacleWidth = obstacle
+                ? obstacle.size.x * Mathf.Abs(obstacle.transform.lossyScale.x)
+                : 0f;
+            Check(pane && obstacle && obstacle.enabled && obstacle.carving
+                  && obstacle.shape == UnityEngine.AI.NavMeshObstacleShape.Box
+                  && obstacleWidth >= opening.OpeningWidth * 0.9f,
+                  opening.name + " 문짝의 NavMeshObstacle 설정과 폭이 올바르다");
+        }
 
         // 문은 넘는 대상이 아니고, 창문은 넘을 수 있어야 한다.
         var entrance = FindOpening(openings, "Door_Entrance");
@@ -3800,6 +3728,7 @@ public static class V01SceneBuilder
             if (collider) panes.Add(collider.gameObject);
         }
 
+        GameObject gateBlock = null;
         try
         {
             for (int i = 0; i < panes.Count; i++) panes[i].SetActive(false);
@@ -3820,13 +3749,166 @@ public static class V01SceneBuilder
             CheckReachable(doorstep, Flat(6.10f, 10.60f), "현관 → 팬트리");
             CheckReachable(doorstep, Flat(10.40f, 10.60f), "현관 → 주방");
             CheckReachable(doorstep, Flat(13.95f, 12.80f), "현관 → 식당");
+            CheckReachable(new Vector3(27f, 0f, -10f), new Vector3(14f, 0f, -19.5f), "포치 앞 → 차고");
+            CheckReachable(new Vector3(14f, 0f, -19.5f), new Vector3(0f, 0f, -16f), "차고 → 기계실");
+            CheckReachable(new Vector3(27f, 0f, -40f), new Vector3(27f, 0f, -16f), "울타리 밖 → 마당");
+
+            gateBlock = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            gateBlock.name = "__GateBlock";
+            gateBlock.transform.position = new Vector3(27f, 1f, -30.1f);
+            gateBlock.transform.localScale = new Vector3(6.4f, 2f, 0.4f);
+            Physics.SyncTransforms();
+            surface.BuildNavMesh();
+
+            var blocked = new UnityEngine.AI.NavMeshPath();
+            bool throughClosedGate = UnityEngine.AI.NavMesh.CalculatePath(
+                new Vector3(27f, 0f, -40f), new Vector3(27f, 0f, -16f),
+                UnityEngine.AI.NavMesh.AllAreas, blocked)
+                && blocked.status == UnityEngine.AI.NavMeshPathStatus.PathComplete;
+            Check(!throughClosedGate, "대문 틈을 막으면 울타리 밖에서 마당으로 갈 수 없다");
         }
         finally
         {
-            for (int i = 0; i < panes.Count; i++) panes[i].SetActive(true);
+            if (gateBlock) Object.DestroyImmediate(gateBlock);
             Physics.SyncTransforms();
-            surface.BuildNavMesh();   // 씬을 원래 상태로 되돌린다
+            try
+            {
+                surface.BuildNavMesh();   // 문짝을 뺀 원래 굽기 상태로 되돌린다
+            }
+            finally
+            {
+                for (int i = 0; i < panes.Count; i++) panes[i].SetActive(true);
+                Physics.SyncTransforms();
+            }
         }
+    }
+
+    static void CheckEstateLayout(Room[] rooms)
+    {
+        var garage = FindRoom(rooms, "차고");
+        var mechanical = FindRoom(rooms, "기계실");
+        Check(garage != null, "차고 Room 이 있다");
+        Check(mechanical != null, "기계실 Room 이 있다");
+        if (garage)
+        {
+            Vector3 size = garage.InnerBounds.size;
+            Check(Mathf.Abs(size.x - 13.9f) < 0.2f && Mathf.Abs(size.z - 10.7f) < 0.2f,
+                  "차고 Room 이 벽 안쪽 면에 맞는다");
+        }
+        if (mechanical)
+        {
+            Vector3 size = mechanical.InnerBounds.size;
+            Check(Mathf.Abs(size.x - 7.625f) < 0.2f && Mathf.Abs(size.z - 5.9f) < 0.2f,
+                  "기계실 Room 이 벽 안쪽 면에 맞는다");
+        }
+        CheckWorldSize("GarageFloor", 14.4f, 11.2f);
+        CheckWorldSize("MechanicalFloor", 8f, 6.4f);
+        CheckWorldSize("ConcreteYard", 19.2f, 16f);
+
+        var north = GameObject.Find("Fence_N");
+        var west = GameObject.Find("Fence_W");
+        var east = GameObject.Find("Fence_E");
+        var southWest = GameObject.Find("Fence_S_W");
+        var southEast = GameObject.Find("Fence_S_E");
+        Check(north && west && east && southWest && southEast, "울타리 네 변이 있다");
+        if (north && west && east && southWest && southEast)
+        {
+            Bounds n = north.GetComponent<Collider>().bounds;
+            Bounds w = west.GetComponent<Collider>().bounds;
+            Bounds e = east.GetComponent<Collider>().bounds;
+            Bounds sw = southWest.GetComponent<Collider>().bounds;
+            Bounds se = southEast.GetComponent<Collider>().bounds;
+            Check(n.min.x <= -6f && n.max.x >= 58f && Mathf.Abs(n.center.z - 19.9f) < 0.05f,
+                  "북쪽 울타리가 부지 너비를 덮는다");
+            Check(w.min.z <= -30.1f && w.max.z >= 19.9f && Mathf.Abs(w.center.x + 6f) < 0.05f,
+                  "서쪽 울타리가 부지 깊이를 덮는다");
+            Check(e.min.z <= -30.1f && e.max.z >= 19.9f && Mathf.Abs(e.center.x - 58f) < 0.05f,
+                  "동쪽 울타리가 부지 깊이를 덮는다");
+            Check(sw.min.x <= -6f && se.max.x >= 58f
+                  && Mathf.Abs(sw.center.z + 30.1f) < 0.05f && Mathf.Abs(se.center.z + 30.1f) < 0.05f
+                  && Mathf.Abs(sw.max.x - 23.8f) < 0.05f && Mathf.Abs(se.min.x - 30.2f) < 0.05f,
+                  "남쪽 울타리가 양 모서리를 덮고 x 23.8~30.2 대문 틈만 남긴다");
+            Check(Mathf.Abs(n.size.y - 2f) < 0.05f && Mathf.Abs(w.size.y - 2f) < 0.05f
+                  && Mathf.Abs(e.size.y - 2f) < 0.05f && Mathf.Abs(sw.size.y - 2f) < 0.05f
+                  && Mathf.Abs(se.size.y - 2f) < 0.05f,
+                  "울타리 높이가 2m 다");
+        }
+
+        var openings = Object.FindObjectsByType<WindowFrame>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        CheckOpeningWidth(openings, "Door_GarageShutter", 5f, "차고 셔터");
+        CheckOpeningWidth(openings, "Door_GarageMechanical", 1.4f, "차고와 기계실 사이 문");
+        CheckOpeningWidth(openings, "Door_MechanicalOutside", 1.4f, "기계실 바깥문");
+        Check(GameObject.Find("GarageCeiling") && GameObject.Find("MechanicalCeiling"),
+              "차고와 기계실에 월담 방지 천장이 있다");
+
+        var rigs = Object.FindObjectsByType<HouseLightRig>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        Check(rigs.Length == 1, "HouseLightRig 는 씬에 하나다");
+    }
+
+    static void CheckWorldSize(string name, float width, float depth)
+    {
+        var go = GameObject.Find(name);
+        Check(go, name + " 이(가) 있다");
+        if (!go) return;
+        Vector3 size = go.GetComponent<Renderer>().bounds.size;
+        Check(Mathf.Abs(size.x - width) < 0.2f && Mathf.Abs(size.z - depth) < 0.2f,
+              name + " 크기가 맞다 (" + size.x.ToString("F2") + " x " + size.z.ToString("F2") + ")");
+    }
+
+    static void CheckOpeningWidth(WindowFrame[] openings, string name, float width, string label)
+    {
+        var opening = FindOpening(openings, name);
+        Check(opening, label + "이(가) 있다");
+        if (!opening) return;
+        Vector3 size = opening.GetComponentInChildren<Collider>(true).bounds.size;
+        Check(Mathf.Abs(Mathf.Max(size.x, size.z) - width) < 0.05f,
+              label + " 폭이 " + width.ToString("F1") + "m 다");
+    }
+
+    static void CheckSpawnClearance()
+    {
+        var items = Object.FindObjectsByType<WorldItem>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        bool allItemsInside = true;
+        for (int i = 0; i < items.Length; i++)
+        {
+            CheckClear(items[i].transform, "아이템 " + items[i].name);
+            Bounds bounds = items[i].GetComponent<Collider>().bounds;
+            allItemsInside &= bounds.min.x >= -6f && bounds.max.x <= 58f
+                              && bounds.min.z >= -30.1f && bounds.max.z <= 19.9f;
+        }
+        Check(allItemsInside, "모든 아이템이 울타리 안에 있다");
+
+        var containers = Object.FindObjectsByType<WorldContainer>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        for (int i = 0; i < containers.Length; i++) CheckClear(containers[i].transform, "컨테이너 " + containers[i].name);
+
+        var zombies = Object.FindObjectsByType<Zombie>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        for (int i = 0; i < zombies.Length; i++) CheckClear(zombies[i].transform, "좀비 " + zombies[i].name);
+
+        var player = GameObject.Find("Player");
+        if (player) CheckClear(player.transform, "플레이어 시작 위치");
+
+        var spawnRoot = GameObject.Find("SpawnPoints");
+        if (spawnRoot)
+            for (int i = 0; i < spawnRoot.transform.childCount; i++)
+                CheckClear(spawnRoot.transform.GetChild(i), "부활 지점 " + spawnRoot.transform.GetChild(i).name);
+    }
+
+    static void CheckClear(Transform target, string label)
+    {
+        var own = target.GetComponent<Collider>();
+        var hits = target.GetComponent<WorldContainer>() && own && own.enabled
+            ? Physics.OverlapBox(own.bounds.center, own.bounds.extents, Quaternion.identity, ~0, QueryTriggerInteraction.Collide)
+            : Physics.OverlapSphere(target.position, 0.3f, ~0, QueryTriggerInteraction.Collide);
+        Collider blocker = null;
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Transform hit = hits[i].transform;
+            if (hit.name == "Ground" || hit == target || hit.IsChildOf(target) || target.IsChildOf(hit)
+                || hits[i].GetComponentInParent<CharacterController>()) continue;
+            blocker = hits[i];
+            break;
+        }
+        Check(!blocker, label + "가 다른 콜라이더 안에 없다" + (blocker ? " (" + blocker.name + ")" : ""));
     }
 
     static Room FindRoom(Room[] rooms, string label)
@@ -4597,7 +4679,92 @@ public static class V01SceneBuilder
         CreateCeiling(root);
         CreatePorch(root, outer, tile);
         CreateFurniture(root);
+        CreateEstate(root, outer, outerFade, wood, tile);
         CreateRoomLights(root);
+    }
+
+    /// <summary>본채와 같은 루트에 부지 시설을 두어 방 전등 리그를 하나만 만든다.</summary>
+    static void CreateEstate(Transform root, Material wall, Material fade, Material wood, Material concrete)
+    {
+        var site = new GameObject("Estate").transform;
+        site.SetParent(root, false);
+        var metal = EnsureSharedMaterial("site_metal", new Color(0.38f, 0.41f, 0.43f));
+        var solar = EnsureSharedMaterial("site_solar", new Color(0.08f, 0.16f, 0.24f));
+
+        WorldBox(site, "ConcreteYard", 17.4f, -24f, 36.6f, -8f, 0.04f, 0f, concrete, false);
+        WorldBox(site, "Driveway", 23.8f, -30.1f, 30.2f, -24f, 0.04f, 0f, concrete, false);
+
+        // 남쪽은 진입로 폭만 비운다. 기둥 안쪽 면도 정확히 대문 경계에 맞춘다.
+        WorldBox(site, "Fence_N", -6f, 19.8f, 58f, 20f, 2f, 0f, metal);
+        WorldBox(site, "Fence_W", -6.1f, -30.1f, -5.9f, 19.9f, 2f, 0f, metal);
+        WorldBox(site, "Fence_E", 57.9f, -30.1f, 58.1f, 19.9f, 2f, 0f, metal);
+        WorldBox(site, "Fence_S_W", -6f, -30.2f, 23.8f, -30f, 2f, 0f, metal);
+        WorldBox(site, "Fence_S_E", 30.2f, -30.2f, 58f, -30f, 2f, 0f, metal);
+        WorldBox(site, "GatePost_W", 23.5f, -30.3f, 23.8f, -29.9f, 2.3f, 0f, metal);
+        WorldBox(site, "GatePost_E", 30.2f, -30.3f, 30.5f, -29.9f, 2.3f, 0f, metal);
+
+        WorldBox(site, "GarageFloor", 2.6f, -25.1f, 17f, -13.9f, 0.04f, 0f, concrete, false);
+        WorldBox(site, "MechanicalFloor", -5.4f, -20.3f, 2.6f, -13.9f, 0.04f, 0f, concrete, false);
+
+        WallRun(site, "GarageWall_S", new Vector3(2.6f, 0f, -25.1f + OuterWall * 0.5f), new Vector3(17f, 0f, -25.1f + OuterWall * 0.5f),
+                RoomHeight, OuterWall, wall, fade, NoCuts);
+        WallRun(site, "GarageWall_N", new Vector3(2.6f, 0f, -13.9f - OuterWall * 0.5f), new Vector3(17f, 0f, -13.9f - OuterWall * 0.5f),
+                RoomHeight, OuterWall, wall, fade, NoCuts);
+        WallRun(site, "GarageWall_E", new Vector3(17f - OuterWall * 0.5f, 0f, -25.1f), new Vector3(17f - OuterWall * 0.5f, 0f, -13.9f),
+                RoomHeight, OuterWall, wall, fade, new[] { new Vector2(5.6f / Scale, 5f / Scale) });
+        WallRun(site, "GarageWall_W_S", new Vector3(2.6f + OuterWall * 0.5f, 0f, -25.1f), new Vector3(2.6f + OuterWall * 0.5f, 0f, -20.3f),
+                RoomHeight, OuterWall, wall, fade, NoCuts);
+        WallRun(site, "SharedWall", new Vector3(2.6f, 0f, -20.3f), new Vector3(2.6f, 0f, -13.9f),
+                RoomHeight, OuterWall, wall, fade, new[] { new Vector2(3.2f / Scale, DoorWidth) });
+
+        WallRun(site, "MechanicalWall_W", new Vector3(-5.4f + OuterWall * 0.5f, 0f, -20.3f), new Vector3(-5.4f + OuterWall * 0.5f, 0f, -13.9f),
+                RoomHeight, OuterWall, wall, fade, NoCuts);
+        WallRun(site, "MechanicalWall_S", new Vector3(-5.4f, 0f, -20.3f + OuterWall * 0.5f), new Vector3(2.6f, 0f, -20.3f + OuterWall * 0.5f),
+                RoomHeight, OuterWall, wall, fade, NoCuts);
+        WallRun(site, "MechanicalWall_N", new Vector3(-5.4f, 0f, -13.9f - OuterWall * 0.5f), new Vector3(2.6f, 0f, -13.9f - OuterWall * 0.5f),
+                RoomHeight, OuterWall, wall, fade, new[] { new Vector2(4f / Scale, DoorWidth) });
+
+        CreateOpening(site, "Door_GarageShutter", new Vector3(17f - OuterWall * 0.5f, 0f, -19.5f), Vector3.forward,
+                      5f / Scale, 0f, DoorHeight, RoomHeight, OuterWall,
+                      wall, fade, metal, "차고 셔터", false);
+        CreateOpening(site, "Door_GarageMechanical", new Vector3(2.6f, 0f, -17.1f), Vector3.forward,
+                      DoorWidth, 0f, DoorHeight, RoomHeight, OuterWall,
+                      wall, fade, wood, "기계실문", false);
+        CreateOpening(site, "Door_MechanicalOutside", new Vector3(-1.4f, 0f, -13.9f - OuterWall * 0.5f), Vector3.right,
+                      DoorWidth, 0f, DoorHeight, RoomHeight, OuterWall,
+                      wall, fade, wood, "기계실 바깥문", false);
+
+        // 차고 서벽은 중간부터 공유벽이라 꺾인다. 직사각형 Room 은 더 안쪽 외벽 면에 맞춰 벽과 겹치지 않게 한다.
+        float gx0 = (2.6f + OuterWall - ApartmentOrigin.x) / Scale;
+        float gx1 = (17f - OuterWall - ApartmentOrigin.x) / Scale;
+        float gz0 = (-25.1f + OuterWall - ApartmentOrigin.z) / Scale;
+        float gz1 = (-13.9f - OuterWall - ApartmentOrigin.z) / Scale;
+        float mx0 = (-5.4f + OuterWall - ApartmentOrigin.x) / Scale;
+        float mx1 = (2.6f - OuterWall * 0.5f - ApartmentOrigin.x) / Scale;
+        float mz0 = (-20.3f + OuterWall - ApartmentOrigin.z) / Scale;
+        float mz1 = (-13.9f - OuterWall - ApartmentOrigin.z) / Scale;
+        FlatRoom(site, "차고", gx0, gz0, gx1, gz1);
+        FlatRoom(site, "기계실", mx0, mz0, mx1, mz1);
+        CreateCeiling(site, "GarageCeiling", new Vector3(9.8f, 0f, -19.5f), 14.4f, 11.2f);
+        CreateCeiling(site, "MechanicalCeiling", new Vector3(-1.4f, 0f, -17.1f), 8f, 6.4f);
+
+        // 셔터에서 공유문으로 가는 중앙 통로와 두 문 앞 1.2m는 비워 둔다.
+        WorldBox(site, "GarageWorkbench", 8f, -14.8f, 12f, -14.2f, 0.9f, 0f, wood);
+        WorldBox(site, "GarageToolWall", 12.4f, -14.15f, 15.8f, -14.05f, 1.5f, 1.1f, metal);
+
+        WorldBox(site, "DieselGenerator", -4.8f, -19.7f, -2.5f, -18.5f, 1.2f, 0f, metal);
+        for (int i = 0; i < 3; i++)
+            WorldBox(site, "FuelDrum_" + i, -1.8f + i * 0.75f, -19.6f, -1.2f + i * 0.75f, -19f, 0.9f, 0f, metal);
+        WorldBox(site, "ESSRack", -4.9f, -17.5f, -4.2f, -15.5f, 2.2f, 0f, metal);
+        WorldBox(site, "InverterPanel", -5.27f, -15.2f, -5.05f, -14.4f, 1.2f, 0.8f, metal);
+        WorldBox(site, "MechanicalWaterTank", 0.7f, -19.7f, 2f, -18.4f, 1.5f, 0f, metal);
+        for (int i = 0; i < 3; i++)
+            WorldBox(site, "WaterFilter_" + i, 0.7f + i * 0.42f, -15f, 1.02f + i * 0.42f, -14.4f, 1.1f, 0f, metal);
+
+        WorldBox(site, "SolarRack", 40f, -18.4f, 52.8f, -12f, 0.6f, 0.35f, solar);
+        WorldCylinder(site, "WellCover", new Vector3(44f, 0f, -22f), 1.6f, 0.18f, metal);
+        WorldCylinder(site, "WaterTank", new Vector3(50f, 0f, -23f), 4.8f, 3f, metal);
+        WorldBox(site, "SepticLid", 53.4f, -27.6f, 56.6f, -24.4f, 0.08f, 0f, metal);
     }
 
     /// <summary>
@@ -4812,7 +4979,10 @@ public static class V01SceneBuilder
                 if (containers[c].DisplayName != map[m, 0]) continue;
 
                 var go = containers[c].gameObject;
-                go.transform.position = target.bounds.center;
+                // 논리 컨테이너 위치가 가구 콜라이더 안이면 저장/스폰 안전 검사에 걸린다.
+                // 냉장고·옷장은 남쪽, 책상은 북쪽의 빈 바닥으로 상호작용 점만 뺀다.
+                Vector3 side = m == 2 ? Vector3.forward : Vector3.back;
+                go.transform.position = target.bounds.center + side * (target.bounds.extents.z + 0.35f);
 
                 var renderer = go.GetComponent<Renderer>();
                 if (renderer) renderer.enabled = false;
@@ -5051,21 +5221,54 @@ public static class V01SceneBuilder
     /// 몸은 그대로 막힌다. NavMesh 도 이 레이어를 제외하고 굽는다 (지붕에 섬이 생기지 않게).
     /// </summary>
     static void CreateCeiling(Transform parent)
+        => CreateCeiling(parent, "Ceiling", ApartmentCenter(),
+                         FlatWidth * Scale + OuterWall * 2f,
+                         FlatDepth * Scale + OuterWall * 2f);
+
+    static void CreateCeiling(Transform parent, string name, Vector3 center, float width, float depth)
     {
         var ceiling = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        ceiling.name = "Ceiling";
+        ceiling.name = name;
         ceiling.transform.SetParent(parent, false);
-        ceiling.transform.position = ApartmentCenter()
-                                     + Vector3.up * (RoomHeight + CeilingThickness * 0.5f);
-        ceiling.transform.localScale = new Vector3(FlatWidth * Scale + OuterWall * 2f,
-                                                   CeilingThickness,
-                                                   FlatDepth * Scale + OuterWall * 2f);
+        ceiling.transform.position = center + Vector3.up * (RoomHeight + CeilingThickness * 0.5f);
+        ceiling.transform.localScale = new Vector3(width, CeilingThickness, depth);
 
         var renderer = ceiling.GetComponent<MeshRenderer>();
         if (renderer) Object.DestroyImmediate(renderer);
 
         int ignoreRaycast = LayerMask.NameToLayer("Ignore Raycast");
         if (ignoreRaycast >= 0) ceiling.layer = ignoreRaycast;
+    }
+
+    static GameObject WorldBox(Transform parent, string name, float x0, float z0, float x1, float z1,
+                               float height, float baseHeight, Material material, bool solid = true)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        go.name = name;
+        go.transform.SetParent(parent, false);
+        go.transform.position = new Vector3((x0 + x1) * 0.5f, baseHeight + height * 0.5f, (z0 + z1) * 0.5f);
+        go.transform.localScale = new Vector3(x1 - x0, height, z1 - z0);
+        var renderer = go.GetComponent<Renderer>();
+        if (renderer) renderer.sharedMaterial = material;
+        if (!solid) Object.DestroyImmediate(go.GetComponent<Collider>());
+        return go;
+    }
+
+    static GameObject WorldCylinder(Transform parent, string name, Vector3 center, float diameter,
+                                    float height, Material material)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        go.name = name;
+        go.transform.SetParent(parent, false);
+        go.transform.position = center + Vector3.up * (height * 0.5f);
+        go.transform.localScale = new Vector3(diameter, height * 0.5f, diameter);
+        var renderer = go.GetComponent<Renderer>();
+        if (renderer) renderer.sharedMaterial = material;
+        Object.DestroyImmediate(go.GetComponent<CapsuleCollider>());
+        var collider = go.AddComponent<MeshCollider>();
+        collider.sharedMesh = go.GetComponent<MeshFilter>().sharedMesh;
+        collider.convex = true;
+        return go;
     }
 
     static readonly Vector2[] NoCuts = new Vector2[0];
