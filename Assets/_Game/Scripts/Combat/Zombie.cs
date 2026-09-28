@@ -1078,7 +1078,7 @@ public class Zombie : MonoBehaviour
     /// <summary>피해량을 지정해 문다. 돌진처럼 일반 공격과 피해가 다른 경로가 쓴다.</summary>
     public void Bite(float damage)
     {
-        if (playerInjuries) playerInjuries.ResolveHit(RollHitPart(), damage);
+        if (playerInjuries) playerInjuries.ResolveBite(RollHitPart(), damage);
         if (playerMotor) playerMotor.ApplyHitStagger();
     }
 

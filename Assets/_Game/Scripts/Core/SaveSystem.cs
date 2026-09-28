@@ -118,8 +118,13 @@ public class SaveSystem : MonoBehaviour
         }
 
         if (injuries)
+        {
             for (int i = 0; i < PlayerInjuries.PartCount; i++)
+            {
                 data.injuries[i] = (int)injuries.GetSeverity((BodyPart)i);
+                data.bleeding[i] = injuries.IsBleeding((BodyPart)i);
+            }
+        }
 
         if (inventory)
         {
@@ -258,6 +263,7 @@ public class SaveSystem : MonoBehaviour
 
     void Restore(SaveData data)
     {
+        player.GetComponent<PlayerConsumer>()?.ResetMedicalState();
         if (clock) clock.LoadState(data.day, data.minuteOfDay);
 
         // CharacterController 가 붙어 있으면 transform 을 직접 옮기기 전에 끄는 편이 안전하다.
@@ -271,8 +277,12 @@ public class SaveSystem : MonoBehaviour
         if (injuries)
         {
             injuries.ClearAll();
-            for (int i = 0; i < data.injuries.Length && i < PlayerInjuries.PartCount; i++)
-                injuries.Apply((BodyPart)i, (InjurySeverity)data.injuries[i]);
+            if (data.injuries != null)
+                for (int i = 0; i < data.injuries.Length && i < PlayerInjuries.PartCount; i++)
+                    injuries.Apply((BodyPart)i, (InjurySeverity)data.injuries[i]);
+            if (data.bleeding != null)
+                for (int i = 0; i < data.bleeding.Length && i < PlayerInjuries.PartCount; i++)
+                    injuries.SetBleeding((BodyPart)i, data.bleeding[i]);
         }
 
         RestoreInventory(data);

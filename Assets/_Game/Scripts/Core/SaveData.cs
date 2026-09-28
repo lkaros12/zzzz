@@ -26,6 +26,8 @@ public class SaveData
 
     /// <summary>부위 6개의 부상 등급. 인덱스 = (int)BodyPart.</summary>
     public int[] injuries = new int[PlayerInjuries.PartCount];
+    /// <summary>부위 6개의 출혈 여부. 이전 세이브에 없으면 모두 false 다.</summary>
+    public bool[] bleeding = new bool[PlayerInjuries.PartCount];
 
     // GDD 19항: 인벤토리 / 장비
     public List<StackSave> inventory = new List<StackSave>();

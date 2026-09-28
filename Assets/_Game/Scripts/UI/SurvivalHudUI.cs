@@ -2,21 +2,19 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// GDD 16항 좌측 하단 허기/탈수/부상/피곤함 아이콘 + 우측 상단 DAY/시간.
+/// GDD 16항 좌측 하단 허기/탈수/피곤함 아이콘 + 우측 상단 DAY/시간.
 /// 아이콘은 상태가 나빠질수록 어두워진다 — 아트가 없는 동안 이모지 글리프로 대체.
 /// GDD 23항대로 읽기만 한다.
 /// </summary>
 public class SurvivalHudUI : MonoBehaviour
 {
     [SerializeField] PlayerStats stats;
-    [SerializeField] PlayerInjuries injuries;
     [SerializeField] GameClock clock;
 
     [Header("상태 아이콘")]
     [SerializeField] Text hungerIcon;
     [SerializeField] Text thirstIcon;
     [SerializeField] Text fatigueIcon;
-    [SerializeField] Text injuryIcon;
 
     [SerializeField] Text clockText;
 
@@ -24,7 +22,6 @@ public class SurvivalHudUI : MonoBehaviour
     [SerializeField] Color hungerColor = new Color(0.95f, 0.65f, 0.25f);
     [SerializeField] Color thirstColor = new Color(0.35f, 0.72f, 0.96f);
     [SerializeField] Color fatigueColor = new Color(0.72f, 0.56f, 0.92f);
-    [SerializeField] Color injuryColor = new Color(0.95f, 0.40f, 0.35f);
     [Tooltip("상태가 최악일 때 색")]
     [SerializeField] Color badColor = new Color(0.17f, 0.15f, 0.15f, 1f);
 
@@ -33,16 +30,14 @@ public class SurvivalHudUI : MonoBehaviour
 
     int lastMinuteShown = -1;
 
-    public void Bind(PlayerStats playerStats, PlayerInjuries playerInjuries, GameClock gameClock,
-                     Text hunger, Text thirst, Text fatigue, Text injury, Text clockLabel)
+    public void Bind(PlayerStats playerStats, GameClock gameClock,
+                     Text hunger, Text thirst, Text fatigue, Text clockLabel)
     {
         stats = playerStats;
-        injuries = playerInjuries;
         clock = gameClock;
         hungerIcon = hunger;
         thirstIcon = thirst;
         fatigueIcon = fatigue;
-        injuryIcon = injury;
         clockText = clockLabel;
     }
 
@@ -58,7 +53,6 @@ public class SurvivalHudUI : MonoBehaviour
         ApplyFont(hungerIcon, font);
         ApplyFont(thirstIcon, font);
         ApplyFont(fatigueIcon, font);
-        ApplyFont(injuryIcon, font);
     }
 
     static void ApplyFont(Text text, Font font)
@@ -75,9 +69,6 @@ public class SurvivalHudUI : MonoBehaviour
             Tint(thirstIcon, thirstColor, stats.Thirst / 100f);
             Tint(fatigueIcon, fatigueColor, stats.Fatigue / 100f);
         }
-
-        if (injuries)
-            Tint(injuryIcon, injuryColor, (int)injuries.WorstSeverity / (float)(int)InjurySeverity.Critical);
 
         UpdateClock();
     }

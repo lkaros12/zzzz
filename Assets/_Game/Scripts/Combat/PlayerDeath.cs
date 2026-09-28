@@ -51,6 +51,7 @@ public class PlayerDeath : MonoBehaviour
     void Die()
     {
         DeathCount++;
+        GetComponent<PlayerConsumer>()?.ResetMedicalState();
 
         if (grapple) grapple.ForceRelease();
 

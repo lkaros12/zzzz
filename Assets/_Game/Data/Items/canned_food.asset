@@ -24,3 +24,26 @@ MonoBehaviour:
   fatigueRestore: 0
   hpRestore: 0
   treatUpTo: 0
+  treatmentDuration: 0
+  recoveryDuration: 0
+  equipSlot: 0
+  defense: 0
+  moveSpeedMultiplier: 1
+  staminaCostMultiplier: 1
+  injuryChanceMultiplier: 1
+  attackDamage: 0
+  attackRange: 1.6
+  attackInterval: 0.8
+  attackStaminaCost: 10
+  handedness: 0
+  maxTargets: 1
+  knockback: 0
+  staggerDuration: 0
+  noise: 0
+  isShield: 0
+  ranged: 0
+  attackSpread: 0
+  ammoId: 
+  magazineSize: 0
+  reloadTime: 1.6
+  maxDurability: 0

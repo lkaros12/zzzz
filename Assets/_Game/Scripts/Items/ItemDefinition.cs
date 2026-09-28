@@ -33,6 +33,10 @@ public class ItemDefinition : ScriptableObject
 
     [Tooltip("이 등급까지 부상을 치료할 수 있다. None 이면 치료 도구가 아니다. (GDD 6항)")]
     public InjurySeverity treatUpTo = InjurySeverity.None;
+    [Tooltip("치료 도구를 감는 데 걸리는 시간(초)")]
+    [Min(0f)] public float treatmentDuration;
+    [Tooltip("HP 회복이 나뉘어 적용되는 시간(초)")]
+    [Min(0f)] public float recoveryDuration;
 
     [Header("장비 (GDD 10항)")]
     [Tooltip("None 이면 장비가 아니다")]

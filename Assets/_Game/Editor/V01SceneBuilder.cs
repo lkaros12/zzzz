@@ -404,18 +404,16 @@ public static class V01SceneBuilder
 
         // GDD 16항 좌측 상태 아이콘. 상태가 나빠지면 어두워진다.
         // 글리프는 BMP 범위만 쓴다 — 레거시 Text 는 서로게이트 페어를 그리지 못한다 (EmojiFont 주석 참고).
-        var hunger = CreateStatusIcon(canvasRect, "HungerIcon", "☕", "허기", 225f);
-        var thirst = CreateStatusIcon(canvasRect, "ThirstIcon", "☔", "탈수", 75f);
-        var injury = CreateStatusIcon(canvasRect, "InjuryIcon", "⚕", "부상", -75f);
-        var fatigue = CreateStatusIcon(canvasRect, "FatigueIcon", "☾", "피곤함", -225f);
+        var hunger = CreateStatusIcon(canvasRect, "HungerIcon", "☕", "허기", 150f);
+        var thirst = CreateStatusIcon(canvasRect, "ThirstIcon", "☔", "탈수", 0f);
+        var fatigue = CreateStatusIcon(canvasRect, "FatigueIcon", "☾", "피곤함", -150f);
 
         // GDD 16항 우측 상단 DAY / 현재 시간.
         var clockLabel = CreateAnchoredText(canvasRect, "ClockLabel", "DAY 1   08:00   낮", 26,
             new Vector2(1f, 1f), new Vector2(-24f, -24f), new Vector2(360f, 36f), TextAnchor.UpperRight);
 
         go.AddComponent<SurvivalHudUI>().Bind(
-            player.GetComponent<PlayerStats>(), player.GetComponent<PlayerInjuries>(), clock,
-            hunger, thirst, fatigue, injury, clockLabel);
+            player.GetComponent<PlayerStats>(), clock, hunger, thirst, fatigue, clockLabel);
 
         go.AddComponent<PickupPromptUI>().Bind(
             player.GetComponent<PlayerInteractor>(), player.GetComponent<PlayerConsumer>(), prompt);
@@ -425,6 +423,7 @@ public static class V01SceneBuilder
         // GDD 11항 인벤토리 화면. 컴포넌트는 캔버스에 둔다 —
         // 패널 오브젝트에 붙이면 패널을 끌 때 컴포넌트도 꺼져서 Tab 으로 다시 열 수 없다.
         CreateInventoryUI(go, sprite, player, CreateQuickSlotBar(go, sprite, player));
+        CreateDamageVignette(canvasRect, player.GetComponent<PlayerInjuries>());
 
         // 한글 글리프가 없는 내장 폰트를 OS 폰트로 전부 교체한다.
         go.AddComponent<KoreanFontApplier>();
@@ -793,13 +792,13 @@ public static class V01SceneBuilder
         panelRect.SetParent(canvas.transform, false);
         panelRect.anchorMin = panelRect.anchorMax = panelRect.pivot = new Vector2(0.5f, 0.5f);
         panelRect.anchoredPosition = Vector2.zero;
-        // 왼쪽 = 인벤토리 격자, 가운데 = 장비 슬롯 (GDD 10항), 오른쪽 = 주변 물건 (GDD 13항).
-        const float equipWidth = 230f;
-        const float nearbyWidth = 240f;
+        // 왼쪽 = 인벤토리 격자, 가운데 = 캐릭터/장비, 오른쪽 = 주변 물건.
         float gridWidth = inventory.Width * cellSize;
         float gridHeight = inventory.Height * cellSize;
-        panelRect.sizeDelta = new Vector2(32f + gridWidth + 24f + equipWidth + 24f + nearbyWidth + 32f,
-                                         gridHeight + 152f);
+        float characterWidth = gridWidth;
+        float nearbyWidth = gridWidth * 0.65f;
+        panelRect.sizeDelta = new Vector2(32f + gridWidth + 24f + characterWidth + 24f + nearbyWidth + 32f,
+                                         gridHeight + 196f);
 
         var panelImage = panel.GetComponent<Image>();
         panelImage.sprite = sprite;
@@ -825,23 +824,56 @@ public static class V01SceneBuilder
         var hint = CreateAnchoredText(panelRect, "Hint", "우클릭 착용/사용 · Shift+우클릭 분할 · 패널 밖으로 드래그해 버리기", 14,
             new Vector2(1f, 0f), new Vector2(-32f, 26f), new Vector2(400f, 36f), TextAnchor.MiddleRight);
 
-        // GDD 10항 장비 슬롯 목록.
-        float equipX = 32f + gridWidth + 24f;
-        CreateAnchoredText(panelRect, "EquipLabel", "장비 (클릭해서 해제)", 16,
-            new Vector2(0f, 1f), new Vector2(equipX, -30f), new Vector2(equipWidth, 26f), TextAnchor.LowerLeft);
+        float characterX = 32f + gridWidth + 24f;
+        CreateAnchoredText(panelRect, "CharacterLabel", "캐릭터 · 장비 (클릭해서 해제)", 16,
+            new Vector2(0f, 1f), new Vector2(characterX, -30f), new Vector2(characterWidth, 26f), TextAnchor.LowerLeft);
 
-        var equipRoot = new GameObject("EquipRoot", typeof(RectTransform));
-        var equipRect = (RectTransform)equipRoot.transform;
-        equipRect.SetParent(panelRect, false);
-        equipRect.anchorMin = equipRect.anchorMax = equipRect.pivot = new Vector2(0f, 1f);
-        equipRect.anchoredPosition = new Vector2(equipX, -68f);
-        equipRect.sizeDelta = new Vector2(equipWidth, 272f);
+        var characterRoot = new GameObject("CharacterPanel", typeof(RectTransform));
+        var characterRect = (RectTransform)characterRoot.transform;
+        characterRect.SetParent(panelRect, false);
+        characterRect.anchorMin = characterRect.anchorMax = characterRect.pivot = new Vector2(0f, 1f);
+        characterRect.anchoredPosition = new Vector2(characterX, -68f);
+        characterRect.sizeDelta = new Vector2(characterWidth, gridHeight);
 
+        var equipmentSlots = new[]
+        {
+            EquipmentSlot.Head, EquipmentSlot.Body, EquipmentSlot.Legs, EquipmentSlot.Feet,
+            EquipmentSlot.Backpack, EquipmentSlot.MainHand, EquipmentSlot.OffHand, EquipmentSlot.Misc
+        };
+        var equipmentButtons = new Button[equipmentSlots.Length];
+        for (int i = 0; i < equipmentSlots.Length; i++)
+        {
+            bool right = i >= 4;
+            equipmentButtons[i] = CreateButton(characterRect, "EquipSlot_" + equipmentSlots[i],
+                PlayerEquipment.SlotName(equipmentSlots[i]) + " : -",
+                new Vector2(0f, -(i % 4) * 44f), new Vector2(136f, 38f),
+                new Vector2(right ? 1f : 0f, 1f), sprite);
+            equipmentButtons[i].GetComponentInChildren<Text>().fontSize = 14;
+        }
+
+        var bodyParts = new Image[PlayerInjuries.PartCount];
+        var bleedingOutlines = new Outline[PlayerInjuries.PartCount];
+        bodyParts[(int)BodyPart.Head] = CreateBodyPart(characterRect, "BodyPart_Head",
+            new Vector2(0f, -14f), new Vector2(52f, 52f), sprite, out bleedingOutlines[(int)BodyPart.Head]);
+        bodyParts[(int)BodyPart.Torso] = CreateBodyPart(characterRect, "BodyPart_Torso",
+            new Vector2(0f, -74f), new Vector2(64f, 100f), sprite, out bleedingOutlines[(int)BodyPart.Torso]);
+        bodyParts[(int)BodyPart.LeftArm] = CreateBodyPart(characterRect, "BodyPart_LeftArm",
+            new Vector2(-49f, -78f), new Vector2(26f, 106f), sprite, out bleedingOutlines[(int)BodyPart.LeftArm]);
+        bodyParts[(int)BodyPart.RightArm] = CreateBodyPart(characterRect, "BodyPart_RightArm",
+            new Vector2(49f, -78f), new Vector2(26f, 106f), sprite, out bleedingOutlines[(int)BodyPart.RightArm]);
+        bodyParts[(int)BodyPart.LeftLeg] = CreateBodyPart(characterRect, "BodyPart_LeftLeg",
+            new Vector2(-18f, -182f), new Vector2(28f, 102f), sprite, out bleedingOutlines[(int)BodyPart.LeftLeg]);
+        bodyParts[(int)BodyPart.RightLeg] = CreateBodyPart(characterRect, "BodyPart_RightLeg",
+            new Vector2(18f, -182f), new Vector2(28f, 102f), sprite, out bleedingOutlines[(int)BodyPart.RightLeg]);
+
+        var injurySummary = CreateAnchoredText(characterRect, "InjurySummary", "부상 없음", 15,
+            new Vector2(0.5f, 0f), new Vector2(0f, 8f), new Vector2(characterWidth, 28f), TextAnchor.MiddleCenter);
         var equipSummary = CreateAnchoredText(panelRect, "EquipSummary", string.Empty, 15,
-            new Vector2(0f, 1f), new Vector2(equipX, -346f), new Vector2(equipWidth, 76f), TextAnchor.UpperLeft);
+            new Vector2(0f, 1f), new Vector2(characterX, -68f - gridHeight - 8f),
+            new Vector2(characterWidth, 50f), TextAnchor.UpperLeft);
 
         // GDD 13항 주변 물건 목록.
-        float nearbyX = equipX + equipWidth + 24f;
+        float nearbyX = characterX + characterWidth + 24f;
         CreateAnchoredText(panelRect, "NearbyLabel", "주변 물건 (클릭해서 줍기)", 16,
             new Vector2(0f, 1f), new Vector2(nearbyX, -30f), new Vector2(nearbyWidth, 26f), TextAnchor.LowerLeft);
 
@@ -871,7 +903,9 @@ public static class V01SceneBuilder
 
         canvas.AddComponent<EquipmentUI>().Bind(
             player.GetComponent<PlayerEquipment>(), player.GetComponent<PlayerInjuries>(),
-            panel, equipRect, equipSummary, sprite);
+            panel, equipmentButtons, equipSummary);
+        canvas.AddComponent<CharacterInjuryUI>().Bind(
+            player.GetComponent<PlayerInjuries>(), panel, bodyParts, bleedingOutlines, injurySummary);
 
         panel.SetActive(false);
 
@@ -1040,6 +1074,47 @@ public static class V01SceneBuilder
         return button;
     }
 
+    static Image CreateBodyPart(RectTransform parent, string name, Vector2 position, Vector2 size,
+                                Sprite sprite, out Outline bleedingOutline)
+    {
+        var go = new GameObject(name, typeof(Image), typeof(Outline));
+        var rect = (RectTransform)go.transform;
+        rect.SetParent(parent, false);
+        rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0.5f, 1f);
+        rect.anchoredPosition = position;
+        rect.sizeDelta = size;
+
+        var image = go.GetComponent<Image>();
+        image.sprite = sprite;
+        image.type = Image.Type.Sliced;
+        image.color = new Color32(0xD3, 0xD1, 0xC7, 0xFF);
+        image.raycastTarget = false;
+
+        bleedingOutline = go.GetComponent<Outline>();
+        bleedingOutline.effectColor = new Color32(0x75, 0x00, 0x00, 0xFF);
+        bleedingOutline.effectDistance = new Vector2(3f, 3f);
+        bleedingOutline.useGraphicAlpha = false;
+        bleedingOutline.enabled = false;
+        return image;
+    }
+
+    static void CreateDamageVignette(RectTransform parent, PlayerInjuries injuries)
+    {
+        var go = new GameObject("DamageVignette", typeof(Image), typeof(DamageVignetteUI));
+        var rect = (RectTransform)go.transform;
+        rect.SetParent(parent, false);
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+
+        var image = go.GetComponent<Image>();
+        image.color = new Color(1f, 1f, 1f, 0f);
+        image.raycastTarget = false;
+        go.GetComponent<DamageVignetteUI>().Bind(injuries, image);
+        rect.SetAsLastSibling();
+    }
+
     static Text CreateAnchoredText(RectTransform parent, string name, string content, int fontSize,
                                    Vector2 anchor, Vector2 anchoredPosition, Vector2 size, TextAnchor alignment)
     {
@@ -1156,7 +1231,7 @@ public static class V01SceneBuilder
                        40f, 0f, 0f, 0f, InjurySeverity.None),
             // 붕대는 중상까지, 구급상자는 심각한 부상까지 (GDD 6항은 등급별 도구를 명시하지 않는다).
             Consumable(EnsureItem("bandage", "붕대", new Color(0.95f, 0.95f, 0.9f), 10, new Vector2Int(1, 1)),
-                       0f, 0f, 0f, 12f, InjurySeverity.Serious),
+                       0f, 0f, 0f, 12f, InjurySeverity.Serious, 5f, 6f),
             // GDD 10항 근접 6종. 한손은 단일 대상 + 약한 경직, 양손은 다중타격 + 넉백 + 경직.
             // 야구방망이 내구도 120 은 GDD 12항 합성 예시("120 → 240") 의 기준값이다.
             Weapon(Equipment(EnsureItem("fire_axe", "손도끼", new Color(0.80f, 0.25f, 0.20f), 1, new Vector2Int(2, 3)),
@@ -1223,7 +1298,7 @@ public static class V01SceneBuilder
                              EquipmentSlot.MainHand, 0f, 0.95f, 1.09f, 1f),
                    40f, 2.2f, 1.25f, 20f, WeaponHandedness.TwoHanded, 3, 1.6f, 0.7f, 240),
             Consumable(EnsureItem("medkit", "구급상자", new Color(0.3f, 0.8f, 0.45f), 1, new Vector2Int(2, 2)),
-                       0f, 0f, 0f, 35f, InjurySeverity.Critical),
+                       0f, 0f, 0f, 60f, InjurySeverity.Critical, 20f, 10f),
             // GDD 10항 상성 예시: 천옷 = 이동속도 증가 > 방어력 감소, 가죽옷 = 방어력 증가 > 이동속도 감소
             Equipment(EnsureItem("cloth_shirt", "천옷", new Color(0.80f, 0.78f, 0.62f), 1, new Vector2Int(2, 2)),
                       EquipmentSlot.Body, 2f, 1.06f, 0.96f, 1.1f),
@@ -1466,7 +1541,8 @@ public static class V01SceneBuilder
 
     /// <summary>GDD 9항 소비 아이템 속성. 기본값(전부 0) 인 에셋에만 채운다.</summary>
     static ItemDefinition Consumable(ItemDefinition item, float hunger, float thirst, float fatigue,
-                                     float hp, InjurySeverity treatUpTo)
+                                     float hp, InjurySeverity treatUpTo,
+                                     float treatmentDuration = 0f, float recoveryDuration = 0f)
     {
         if (item.usable) return item;
 
@@ -1476,6 +1552,8 @@ public static class V01SceneBuilder
         item.fatigueRestore = fatigue;
         item.hpRestore = hp;
         item.treatUpTo = treatUpTo;
+        item.treatmentDuration = treatmentDuration;
+        item.recoveryDuration = recoveryDuration;
         EditorUtility.SetDirty(item);
         return item;
     }
@@ -1740,6 +1818,7 @@ public static class V01SceneBuilder
             CheckClock();
             CheckSurvival();
             CheckEquipment();
+            CheckMedicalTreatmentUI();
             CheckCombat();
             CheckSaveRoundTrip();
             CheckWeaponsAndDurability();
@@ -2059,6 +2138,104 @@ public static class V01SceneBuilder
         }
     }
 
+    /// <summary>부상 UI, 출혈 기본값, 치료 시간과 완료 결과를 에디트 모드에서 검증한다.</summary>
+    static void CheckMedicalTreatmentUI()
+    {
+        Check(FindInactiveTransform("HungerIcon"), "HUD 허기 아이콘 존재");
+        Check(FindInactiveTransform("ThirstIcon"), "HUD 탈수 아이콘 존재");
+        Check(FindInactiveTransform("FatigueIcon"), "HUD 피곤함 아이콘 존재");
+        Check(!FindInactiveTransform("InjuryIcon"), "HUD 부상 아이콘 제거");
+
+        var grid = FindInactiveTransform("GridRoot") as RectTransform;
+        var character = FindInactiveTransform("CharacterPanel") as RectTransform;
+        var nearby = FindInactiveTransform("NearbyRoot") as RectTransform;
+        Check(grid && character && nearby, "Tab 세 패널 존재");
+        Check(Mathf.Abs(character.rect.width - grid.rect.width) <= 2f, "캐릭터 패널 폭 = 격자 폭");
+        Check(Mathf.Abs(nearby.rect.width - grid.rect.width * 0.65f) <= 2f, "주변 패널 폭 = 격자 폭 x 0.65");
+
+        int bodyPartCount = 0;
+        int equipmentSlotCount = 0;
+        int leftSlots = 0;
+        int rightSlots = 0;
+        foreach (var rect in character.GetComponentsInChildren<RectTransform>(true))
+        {
+            if (rect.name.StartsWith("BodyPart_")) bodyPartCount++;
+            if (!rect.name.StartsWith("EquipSlot_")) continue;
+            equipmentSlotCount++;
+            if (rect.anchorMin.x < 0.5f) leftSlots++;
+            else rightSlots++;
+        }
+        Check(bodyPartCount == PlayerInjuries.PartCount, "캐릭터 부위 이미지 6개");
+        Check(equipmentSlotCount == 8 && leftSlots == 4 && rightSlots == 4,
+              "장비 칸 8개가 그림 양옆에 4개씩");
+
+        var bandageAsset = AssetDatabase.LoadAssetAtPath<ItemDefinition>(ItemDataFolder + "/bandage.asset");
+        var medkitAsset = AssetDatabase.LoadAssetAtPath<ItemDefinition>(ItemDataFolder + "/medkit.asset");
+        Check(bandageAsset && medkitAsset, "붕대와 구급상자 에셋 존재");
+        Check(Mathf.Approximately(bandageAsset.treatmentDuration, 5f)
+              && Mathf.Approximately(medkitAsset.treatmentDuration, 20f), "치료 시간 5초 / 20초");
+        Check(Mathf.Approximately(bandageAsset.hpRestore, 12f)
+              && Mathf.Approximately(medkitAsset.hpRestore, 60f), "회복량 12 / 60");
+        Check(Mathf.Approximately(bandageAsset.recoveryDuration, 6f)
+              && Mathf.Approximately(medkitAsset.recoveryDuration, 10f), "회복 시간 6초 / 10초");
+        Check(bandageAsset.treatUpTo == InjurySeverity.Serious
+              && medkitAsset.treatUpTo == InjurySeverity.Critical, "치료 한도 중상 / 심각");
+
+        var vignette = FindInactiveTransform("DamageVignette");
+        Check(vignette && vignette.GetComponent<DamageVignetteUI>(), "HUD 피격 테두리 UI 존재");
+        Check(!vignette.GetComponent<Image>().raycastTarget, "피격 테두리는 레이캐스트를 막지 않음");
+
+        var go = new GameObject("__MedicalSelfCheck");
+        var bandage = ScriptableObject.CreateInstance<ItemDefinition>();
+        try
+        {
+            var stats = go.AddComponent<PlayerStats>();
+            stats.ResetStats();
+            var inventory = go.AddComponent<PlayerInventory>();
+            var injuries = go.AddComponent<PlayerInjuries>();
+            var consumer = go.AddComponent<PlayerConsumer>();
+
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            Check(Mathf.Approximately((float)typeof(PlayerInjuries).GetField("bleedingChance", flags).GetValue(injuries), 0.4f)
+                  && Mathf.Approximately((float)typeof(PlayerInjuries).GetField("bleedingTickInterval", flags).GetValue(injuries), 5f)
+                  && Mathf.Approximately((float)typeof(PlayerInjuries).GetField("bleedingDamagePerTick", flags).GetValue(injuries), 2f),
+                  "출혈 기본값 0.4 / 5초 / 2");
+
+            bandage.id = "bandage_self_check";
+            bandage.displayName = "붕대";
+            bandage.usable = true;
+            bandage.maxStack = 1;
+            bandage.hpRestore = 12f;
+            bandage.treatUpTo = InjurySeverity.Serious;
+            bandage.treatmentDuration = 5f;
+            bandage.recoveryDuration = 6f;
+
+            stats.TakeDamage(20f);
+            injuries.Apply(BodyPart.LeftArm, InjurySeverity.Serious);
+            injuries.SetBleeding(BodyPart.LeftArm, true);
+            Check(inventory.Add(bandage, 1) == 1, "자기검사용 붕대 획득");
+            Check(consumer.TryUse(inventory.GetStack(0)), "붕대 감기 시작");
+            Check(consumer.CompleteTreatment(), "치료 완료 함수 직접 호출");
+            Check(!injuries.IsBleeding(BodyPart.LeftArm), "치료 완료 시 출혈 하나 멎음");
+            Check(injuries.GetSeverity(BodyPart.LeftArm) == InjurySeverity.None, "치료 완료 시 기존 부상 치료");
+            Check(Mathf.Approximately(consumer.RecoveryRemaining, 12f)
+                  && Mathf.Approximately(consumer.RecoverySecondsRemaining, 6f), "서서히 회복 목표 12 / 6초 설정");
+            Check(inventory.Stacks.Count == 0, "치료 완료 순간 아이템 1개 소비");
+        }
+        finally
+        {
+            Object.DestroyImmediate(bandage);
+            Object.DestroyImmediate(go);
+        }
+    }
+
+    static Transform FindInactiveTransform(string name)
+    {
+        foreach (var candidate in Object.FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            if (candidate.name == name) return candidate;
+        return null;
+    }
+
     /// <summary>GDD 7항 전투 / 저항 / GDD 8항 사망·좀비화 검증 (난수에 의존하지 않는 부분만).</summary>
     static void CheckCombat()
     {
@@ -2165,6 +2342,7 @@ public static class V01SceneBuilder
 
         data.injuries[(int)BodyPart.LeftLeg] = (int)InjurySeverity.Serious;
         data.injuries[(int)BodyPart.Head] = (int)InjurySeverity.Minor;
+        data.bleeding[(int)BodyPart.RightArm] = true;
 
         data.inventory.Add(new StackSave { id = "water_bottle", quantity = 3, x = 2, y = 1 });
         data.inventory.Add(new StackSave { id = "fire_axe", quantity = 1, x = 5, y = 0 });
@@ -2197,6 +2375,8 @@ public static class V01SceneBuilder
         Check(back.injuries[(int)BodyPart.LeftLeg] == (int)InjurySeverity.Serious, "왼다리 중상 보존");
         Check(back.injuries[(int)BodyPart.Head] == (int)InjurySeverity.Minor, "머리 경상 보존");
         Check(back.injuries[(int)BodyPart.Torso] == (int)InjurySeverity.None, "부상 없는 부위는 없음으로");
+        Check(back.bleeding[(int)BodyPart.RightArm], "오른팔 출혈 보존");
+        Check(!back.bleeding[(int)BodyPart.LeftArm], "출혈 없는 부위는 false");
 
         Check(back.inventory.Count == 2, "인벤토리 스택 2개 보존");
         Check(back.inventory[0].id == "water_bottle" && back.inventory[0].quantity == 3, "스택 종류/수량 보존");

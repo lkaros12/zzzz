@@ -32,6 +32,11 @@ public class PlayerInjuries : MonoBehaviour
     [Tooltip("이 값만큼 방어력을 넘긴 피해에서 부상 확률이 100% 가 된다")]
     [SerializeField] float injuryChanceScale = 30f;
 
+    [Header("출혈")]
+    [SerializeField, Range(0f, 1f)] float bleedingChance = 0.4f;
+    [SerializeField, Min(0.1f)] float bleedingTickInterval = 5f;
+    [SerializeField, Min(0f)] float bleedingDamagePerTick = 2f;
+
     // 부상 등급은 "맞은 크기" 가 아니라 "남은 HP 비율" 로 정한다.
     // 한 대 맞고 HP 가 거의 안 깎였는데 중상이 뜨는 게 이상했기 때문이다.
     [Tooltip("남은 HP 비율이 이 값 이하면 중상. 그 위는 경상")]
@@ -42,9 +47,11 @@ public class PlayerInjuries : MonoBehaviour
     [SerializeField] GameClock clock;
 
     readonly InjurySeverity[] severities = new InjurySeverity[PartCount];
+    readonly bool[] bleeding = new bool[PartCount];
 
     PlayerStats stats;
     PlayerEquipment equipment;
+    float bleedingElapsed;
 
     /// <summary>부상 상태가 바뀔 때마다 증가. UI 가 매 프레임 문자열을 다시 만들지 않게 하는 용도.</summary>
     public int Version { get; private set; }
@@ -52,8 +59,12 @@ public class PlayerInjuries : MonoBehaviour
     public bool HasAnyInjury { get; private set; }
     public InjurySeverity WorstSeverity { get; private set; }
     public int InjuryCount { get; private set; }
+    public int BleedingCount { get; private set; }
+    public int BleedingTickVersion { get; private set; }
+    public int BiteVersion { get; private set; }
 
     public InjurySeverity GetSeverity(BodyPart part) => severities[(int)part];
+    public bool IsBleeding(BodyPart part) => bleeding[(int)part];
 
     // GDD 6항 효과: 다리 = 이동, 팔 = 공격 효율, 머리 = 행동 효율.
     public float MoveSpeedMultiplier => Lookup(legSpeedMultiplier, WorstOf(BodyPart.LeftLeg, BodyPart.RightLeg));
@@ -70,6 +81,19 @@ public class PlayerInjuries : MonoBehaviour
 
     void Update()
     {
+        if (BleedingCount > 0 && stats)
+        {
+            bleedingElapsed += Time.deltaTime;
+            float interval = Mathf.Max(0.1f, bleedingTickInterval);
+            if (bleedingElapsed >= interval)
+            {
+                int ticks = Mathf.FloorToInt(bleedingElapsed / interval);
+                bleedingElapsed -= ticks * interval;
+                stats.TakeDamage(bleedingDamagePerTick * BleedingCount * ticks);
+                BleedingTickVersion += ticks;
+            }
+        }
+
         if (!HasAnyInjury || !clock || !stats) return;
 
         float drain = DrainPerGameHour() * clock.DeltaGameHours;
@@ -78,7 +102,12 @@ public class PlayerInjuries : MonoBehaviour
 
     public void ClearAll()
     {
-        for (int i = 0; i < severities.Length; i++) severities[i] = InjurySeverity.None;
+        for (int i = 0; i < severities.Length; i++)
+        {
+            severities[i] = InjurySeverity.None;
+            bleeding[i] = false;
+        }
+        bleedingElapsed = 0f;
         Recalculate();
     }
 
@@ -121,6 +150,45 @@ public class PlayerInjuries : MonoBehaviour
 
         if (stats) stats.TakeDamage(Mathf.Max(0f, damage - defense));
         return RollInjury(part, damage, defense, chanceMultiplier);
+    }
+
+    /// <summary>좀비 물림 한 번의 피해·부상·출혈을 같은 부위에 적용한다.</summary>
+    public InjurySeverity ResolveBite(BodyPart part, float damage)
+    {
+        BiteVersion++;
+        var severity = ResolveHit(part, damage);
+        if (Random.value < bleedingChance) SetBleeding(part, true);
+        return severity;
+    }
+
+    public void SetBleeding(BodyPart part, bool active)
+    {
+        int index = (int)part;
+        if (bleeding[index] == active) return;
+
+        bleeding[index] = active;
+        if (active && BleedingCount == 0) bleedingElapsed = 0f;
+        Recalculate();
+    }
+
+    /// <summary>부위 순서상 첫 출혈 하나를 멈춘다.</summary>
+    public bool StopOneBleeding()
+    {
+        for (int i = 0; i < bleeding.Length; i++)
+        {
+            if (!bleeding[i]) continue;
+            SetBleeding((BodyPart)i, false);
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool HasTreatable(InjurySeverity maxTreatable)
+    {
+        for (int i = 0; i < severities.Length; i++)
+            if (severities[i] > InjurySeverity.None && severities[i] <= maxTreatable) return true;
+        return false;
     }
 
     /// <summary>GDD 6항 치료. 치료 가능한 등급 중 가장 심한 부상 하나를 낫게 한다.</summary>
@@ -184,15 +252,19 @@ public class PlayerInjuries : MonoBehaviour
         HasAnyInjury = false;
         WorstSeverity = InjurySeverity.None;
         InjuryCount = 0;
+        BleedingCount = 0;
 
         for (int i = 0; i < severities.Length; i++)
         {
+            if (bleeding[i]) BleedingCount++;
             if (severities[i] == InjurySeverity.None) continue;
 
             HasAnyInjury = true;
             InjuryCount++;
             if (severities[i] > WorstSeverity) WorstSeverity = severities[i];
         }
+
+        if (BleedingCount == 0) bleedingElapsed = 0f;
 
         Version++;
     }
