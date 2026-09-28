@@ -92,7 +92,7 @@ public static class V01SceneBuilder
         Debug.Log("[V0.1] 샌드박스 씬 생성 완료: " + ScenePath);
     }
 
-    static void CreateLight()
+    internal static void CreateLight()
     {
         var go = new GameObject("Directional Light");
         go.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
@@ -234,7 +234,7 @@ public static class V01SceneBuilder
     /// 실제로 좀비가 바닥을 통과해 -1100m 까지 낙하하면서도 플레이어를 계속 물었다.
     /// 겉모습은 그대로 두고 콜라이더만 두꺼운 박스로 바꾼다 (윗면은 y=0 유지).
     /// </summary>
-    static void MakeGroundSolid(GameObject ground)
+    internal static void MakeGroundSolid(GameObject ground)
     {
         var mesh = ground.GetComponent<MeshCollider>();
         if (mesh) Object.DestroyImmediate(mesh);
@@ -259,7 +259,7 @@ public static class V01SceneBuilder
     /// </summary>
     public static float AgentClimb() => UnityEngine.AI.NavMesh.GetSettingsByID(0).agentClimb;
 
-    static void BuildNavMesh()
+    internal static void BuildNavMesh()
     {
         var go = new GameObject("NavMesh");
         var surface = go.AddComponent<Unity.AI.Navigation.NavMeshSurface>();
@@ -304,7 +304,7 @@ public static class V01SceneBuilder
                   + " (에이전트 반지름 " + AgentRadius().ToString("F2") + "m, 문 제외)");
     }
 
-    static GameObject CreatePlayer()
+    internal static GameObject CreatePlayer()
     {
         var player = GameObject.CreatePrimitive(PrimitiveType.Capsule);
         player.name = "Player";
@@ -358,7 +358,7 @@ public static class V01SceneBuilder
         return player;
     }
 
-    static void CreateCamera(Transform target)
+    internal static void CreateCamera(Transform target)
     {
         var go = new GameObject("Main Camera") { tag = "MainCamera" };
         go.transform.rotation = Quaternion.Euler(30f, 45f, 0f);
@@ -376,13 +376,13 @@ public static class V01SceneBuilder
         go.AddComponent<IsometricCamera>().SetTarget(target);
     }
 
-    static GameClock CreateGameClock()
+    internal static GameClock CreateGameClock()
     {
         var go = new GameObject("GameClock");
         return go.AddComponent<GameClock>();
     }
 
-    static void CreateHud(GameObject player, GameClock clock)
+    internal static void CreateHud(GameObject player, GameClock clock)
     {
         var sprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
 
@@ -1616,7 +1616,7 @@ public static class V01SceneBuilder
     }
 
     /// <summary>아이템이 아닌 플레이스홀더용 공유 머티리얼. sharedMaterial 로 붙여 누출을 막는다.</summary>
-    static Material EnsureSharedMaterial(string id, Color color)
+    internal static Material EnsureSharedMaterial(string id, Color color)
     {
         Directory.CreateDirectory(MaterialFolder);
         string path = MaterialFolder + "/" + id + ".mat";
@@ -3305,7 +3305,7 @@ public static class V01SceneBuilder
     ///  - MSAA 꺼짐: 그림자 경계와 별개로 모든 기하 실루엣이 톱니였다. 그림자맵 해상도로는
     ///    이건 안 고쳐진다 (다른 원인, 다른 처방).
     /// </summary>
-    static void ApplyRenderSettings()
+    internal static void ApplyRenderSettings()
     {
         var pipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline
                        as UniversalRenderPipelineAsset;
@@ -5442,7 +5442,7 @@ public static class V01SceneBuilder
     }
 
     /// <summary>전부 정적이다. 배칭과 라이트맵이 걸리도록 표시한다.</summary>
-    static void MarkStatic(Transform root)
+    internal static void MarkStatic(Transform root)
     {
         var all = root.GetComponentsInChildren<Transform>(true);
         for (int i = 0; i < all.Length; i++)
