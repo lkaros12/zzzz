@@ -30,8 +30,11 @@ public class WallSegment : MonoBehaviour
     [SerializeField] Renderer[] targets;
     [SerializeField] Material[] opaqueMaterials;
     [SerializeField] Material[] fadeMaterials;
+    [SerializeField] bool exterior;
+    [SerializeField] Room[] roofRooms;
 
     MaterialPropertyBlock block;
+    Material[] roofOpaqueMaterials;
     float alpha = 1f;
     bool requested;
 
@@ -39,6 +42,31 @@ public class WallSegment : MonoBehaviour
     public bool IsFaded => alpha < 0.99f;
     public float Alpha => alpha;
     public int VisualCount => targets != null ? targets.Length : 0;
+    public bool IsExterior => exterior;
+    public bool IsRoof => roofRooms != null && roofRooms.Length > 0;
+    public bool DrawsOverVisionFog => IsRoof;
+    public int TargetOpaqueRenderQueue
+    {
+        get
+        {
+            var fog = Shader.Find("Game/VisionFog");
+            return fog ? fog.renderQueue + 1 : -1;
+        }
+    }
+    public IReadOnlyList<Room> RoofRooms => roofRooms;
+
+    public Bounds Bounds
+    {
+        get
+        {
+            if (targets == null || targets.Length == 0 || !targets[0]) return new Bounds(transform.position, Vector3.zero);
+
+            var bounds = targets[0].bounds;
+            for (int i = 1; i < targets.Length; i++)
+                if (targets[i]) bounds.Encapsulate(targets[i].bounds);
+            return bounds;
+        }
+    }
 
     public Vector3 Center
     {
@@ -54,13 +82,21 @@ public class WallSegment : MonoBehaviour
     void Awake()
     {
         if (targets == null || targets.Length == 0) BindOwnRenderer();
+        CreateRoofOpaqueMaterials();
     }
 
     void OnEnable() { if (!all.Contains(this)) all.Add(this); }
     void OnDisable() => all.Remove(this);
 
+    void OnDestroy()
+    {
+        if (roofOpaqueMaterials == null) return;
+        for (int i = 0; i < roofOpaqueMaterials.Length; i++)
+            if (roofOpaqueMaterials[i]) Destroy(roofOpaqueMaterials[i]);
+    }
+
     /// <summary>플레이스홀더 박스일 때. 자기 렌더러 하나만 다룬다.</summary>
-    public void Setup(Material opaque, Material fade)
+    public void Setup(Material opaque, Material fade, bool isExterior = false)
     {
         var own = GetComponent<Renderer>();
         if (!own) return;
@@ -68,6 +104,25 @@ public class WallSegment : MonoBehaviour
         targets = new[] { own };
         opaqueMaterials = new[] { opaque ? opaque : own.sharedMaterial };
         fadeMaterials = new[] { fade };
+        exterior = isExterior;
+    }
+
+    /// <summary>지붕과 방을 빌더가 직접 묶는다. 이름이나 좌표로 소속 건물을 추측하지 않는다.</summary>
+    public void BindRoof(Room[] rooms) => roofRooms = rooms;
+
+    public bool Covers(Room room)
+    {
+        if (!room || roofRooms == null) return false;
+        for (int i = 0; i < roofRooms.Length; i++)
+            if (roofRooms[i] == room) return true;
+        return false;
+    }
+
+    public void SetVisible(bool visible)
+    {
+        if (targets == null) return;
+        for (int i = 0; i < targets.Length; i++)
+            if (targets[i] && targets[i].enabled != visible) targets[i].enabled = visible;
     }
 
     void BindOwnRenderer()
@@ -78,6 +133,21 @@ public class WallSegment : MonoBehaviour
         targets = new[] { own };
         opaqueMaterials = new[] { own.sharedMaterial };
         fadeMaterials = new Material[1];
+    }
+
+    void CreateRoofOpaqueMaterials()
+    {
+        int renderQueue = TargetOpaqueRenderQueue;
+        if (!DrawsOverVisionFog || renderQueue < 0 || opaqueMaterials == null) return;
+
+        roofOpaqueMaterials = new Material[opaqueMaterials.Length];
+        for (int i = 0; i < opaqueMaterials.Length; i++)
+        {
+            if (!opaqueMaterials[i]) continue;
+            roofOpaqueMaterials[i] = new Material(opaqueMaterials[i]) { renderQueue = renderQueue };
+        }
+        opaqueMaterials = roofOpaqueMaterials;
+        Apply();
     }
 
     /// <summary>

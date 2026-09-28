@@ -3536,6 +3536,7 @@ public static class V01SceneBuilder
 
         for (int i = 0; i < walls.Length; i++)
         {
+            if (walls[i].IsRoof) continue;
             var collider = walls[i].GetComponent<Collider>();
             Check(collider && collider.enabled, "벽 콜라이더는 투명화와 무관하게 살아 있다");
         }
@@ -3579,6 +3580,7 @@ public static class V01SceneBuilder
         Check(Mathf.Abs(storage.z - dining.z) < 0.2f, "북쪽 띠 네 방의 깊이가 같다");
 
         CheckEstateLayout(rooms);
+        CheckRoofsAndHeight(rooms);
         CheckSpawnClearance();
 
         // 현관에서 각 방까지 실제로 갈 수 있는가.
@@ -3843,6 +3845,60 @@ public static class V01SceneBuilder
 
         var rigs = Object.FindObjectsByType<HouseLightRig>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         Check(rigs.Length == 1, "HouseLightRig 는 씬에 하나다");
+    }
+
+    static void CheckRoofsAndHeight(Room[] rooms)
+    {
+        var segments = Object.FindObjectsByType<WallSegment>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        var roofs = new System.Collections.Generic.List<WallSegment>();
+        for (int i = 0; i < segments.Length; i++)
+            if (segments[i].IsRoof) roofs.Add(segments[i]);
+
+        Check(roofs.Count == 3, "본채·포치·차고+기계실 지붕이 하나씩 있다");
+        var main = roofs.Find(x => x.name == "MainRoof");
+        var porch = roofs.Find(x => x.name == "Porch_Roof");
+        var estate = roofs.Find(x => x.name == "EstateRoof");
+        CheckRoof(main, "본채", 11.675f, -4.325f, 40.325f, 17.925f, 11);
+        CheckRoof(estate, "부지", -5.4f, -25.1f, 17f, -13.9f, 2);
+        Check(porch && porch.RoofRooms != null && porch.RoofRooms.Count == 11,
+              "포치 지붕이 본채 방 11개와 직접 연결돼 있다");
+        if (estate)
+            Check(estate.Covers(FindRoom(rooms, "차고")) && estate.Covers(FindRoom(rooms, "기계실")),
+                  "부지 지붕이 차고·기계실 Room 과 직접 연결돼 있다");
+
+        for (int i = 0; i < rooms.Length; i++)
+            Check(Mathf.Abs(rooms[i].InnerBounds.size.y - RoomHeight) < 0.01f,
+                  rooms[i].DisplayName + " 방 상자 높이가 층고와 같다");
+
+        string[] ceilingNames = { "Ceiling", "GarageCeiling", "MechanicalCeiling" };
+        for (int i = 0; i < ceilingNames.Length; i++)
+        {
+            var ceiling = GameObject.Find(ceilingNames[i]);
+            var collider = ceiling ? ceiling.GetComponent<Collider>() : null;
+            Check(collider && Mathf.Abs(collider.bounds.min.y - RoomHeight) < 0.05f,
+                  ceilingNames[i] + " 밑면이 층고 " + RoomHeight.ToString("F1") + "m 와 같다");
+        }
+    }
+
+    static void CheckRoof(WallSegment roof, string label, float x0, float z0, float x1, float z1, int roomCount)
+    {
+        Check(roof, label + " 지붕이 있다");
+        if (!roof) return;
+
+        Bounds bounds = roof.Bounds;
+        Check(bounds.min.x <= x0 - 0.3f && bounds.max.x >= x1 + 0.3f
+              && bounds.min.z <= z0 - 0.3f && bounds.max.z >= z1 + 0.3f,
+              label + " 지붕이 바깥 벽을 사방 0.3m 이상 덮는다");
+        Check(bounds.min.y >= RoomHeight - 0.01f, label + " 지붕 밑면이 층고 이상이다");
+        Check(roof.GetComponentsInChildren<Collider>(true).Length == 0, label + " 지붕에 콜라이더가 없다");
+        Check((Vision.BlockerMask & (1 << roof.gameObject.layer)) == 0,
+              label + " 지붕이 시야·조준 판정에 걸리지 않는다");
+        Check(roof.RoofRooms != null && roof.RoofRooms.Count == roomCount,
+              label + " 지붕에 Room " + roomCount + "개가 직접 연결돼 있다");
+
+        var fog = Shader.Find("Game/VisionFog");
+        Check(fog && roof.DrawsOverVisionFog && roof.TargetOpaqueRenderQueue > fog.renderQueue,
+              label + " 지붕이 시야 음영 위에 그려지도록 표시돼 있다");
     }
 
     static void CheckWorldSize(string name, float width, float depth)
@@ -4481,7 +4537,7 @@ public static class V01SceneBuilder
 
     static GameObject CreateWallPiece(Transform parent, string name, Vector3 center, Vector3 axis,
                                       float length, float height, float centerHeight, float thickness,
-                                      Material wall, Material fade)
+                                      Material wall, Material fade, bool exterior = false)
     {
         var piece = GameObject.CreatePrimitive(PrimitiveType.Cube);
         piece.name = name;
@@ -4493,7 +4549,7 @@ public static class V01SceneBuilder
         var renderer = piece.GetComponent<Renderer>();
         if (renderer) renderer.sharedMaterial = wall;
 
-        piece.AddComponent<WallSegment>().Setup(wall, fade);
+        piece.AddComponent<WallSegment>().Setup(wall, fade, exterior);
         return piece;
     }
 
@@ -4502,7 +4558,9 @@ public static class V01SceneBuilder
     const float FlatDepth = 13.50f;     // 실내 세로 (외곽 14.00 - 외벽 0.25 x 2)
     const float OuterWall = 0.25f;
     const float InnerWall = 0.12f;
-    const float RoomHeight = 3.0f;
+    const float RoomHeight = 3.6f;
+    const float RoofEave = 0.4f;
+    const float RoofThickness = 0.25f;
     // CreateOpening 이 폭에 Scale 을 곱하므로 미리 나눠둔다 → 최종 1.4m.
     // 방만 키우고 문은 사람 치수로 남겨야 한다 (2.2m 짜리 문은 벽이 뚫린 것처럼 보인다).
     const float DoorWidth = 1.4f / Scale;
@@ -4577,17 +4635,17 @@ public static class V01SceneBuilder
                     new Vector2(1.90f + OuterWall, 2.30f),   // 거실 서쪽 창
                     new Vector2(5.10f + OuterWall, 2.30f),   // 거실 동쪽 창
                     new Vector2(9.37f + OuterWall, DoorWidth), // 현관문
-                });
+                }, true);
         WallRun(root, "Wall_N", Flat(-OuterWall, FlatDepth + OuterWall * 0.5f), Flat(FlatWidth + OuterWall, FlatDepth + OuterWall * 0.5f),
                 RoomHeight, OuterWall, outer, outerFade, new[]
                 {
                     new Vector2(9.10f + OuterWall, DoorWidth), // 뒷문 (숲 쪽 탈출)
                     new Vector2(11.60f + OuterWall, 1.40f),    // 주방 창
-                });
+                }, true);
         WallRun(root, "Wall_W", Flat(-OuterWall * 0.5f, 0f), Flat(-OuterWall * 0.5f, FlatDepth),
-                RoomHeight, OuterWall, outer, outerFade, new[] { new Vector2(MidDoorY, 1.40f) });
+                RoomHeight, OuterWall, outer, outerFade, new[] { new Vector2(MidDoorY, 1.40f) }, true);
         WallRun(root, "Wall_E", Flat(FlatWidth + OuterWall * 0.5f, 0f), Flat(FlatWidth + OuterWall * 0.5f, FlatDepth),
-                RoomHeight, OuterWall, outer, outerFade, new[] { new Vector2(MidDoorY, 2.20f) });
+                RoomHeight, OuterWall, outer, outerFade, new[] { new Vector2(MidDoorY, 2.20f) }, true);
 
         // ---- 띠를 나누는 가로 칸막이 ----
         WallRun(root, "Wall_BandSM", Flat(0f, WallSM), Flat(FlatWidth, WallSM),
@@ -4629,8 +4687,8 @@ public static class V01SceneBuilder
                 RoomHeight, InnerWall, inner, innerFade, new[] { new Vector2(11.56f - BandNorthStart, DoorWidth) });
 
         // ---- 문 (창턱이 없어서 열면 걸어 나간다 → vaultable=false) ----
-        Door(root, "Door_Entrance", Flat(9.37f, -OuterWall * 0.5f), Vector3.right, OuterWall, outer, outerFade, wood, "현관문");
-        Door(root, "Door_Back", Flat(9.10f, FlatDepth + OuterWall * 0.5f), Vector3.right, OuterWall, outer, outerFade, wood, "뒷문");
+        Door(root, "Door_Entrance", Flat(9.37f, -OuterWall * 0.5f), Vector3.right, OuterWall, outer, outerFade, wood, "현관문", true);
+        Door(root, "Door_Back", Flat(9.10f, FlatDepth + OuterWall * 0.5f), Vector3.right, OuterWall, outer, outerFade, wood, "뒷문", true);
         Door(root, "Door_Living", Flat(6.10f, WallSM), Vector3.right, InnerWall, inner, innerFade, wood, "거실문");
         Door(root, "Door_Hall", Flat(9.37f, WallSM), Vector3.right, InnerWall, inner, innerFade, wood, "중앙홀문");
         Door(root, "Door_Storage", Flat(2.00f, WallMN), Vector3.right, InnerWall, inner, innerFade, wood, "창고문");
@@ -4677,6 +4735,10 @@ public static class V01SceneBuilder
         FlatRoom(root, "식당", 13.36f, BandNorthStart, FlatWidth, FlatDepth);
 
         CreateCeiling(root);
+        CreateRoof(root, "MainRoof", ApartmentCenter(),
+                   (FlatWidth + OuterWall) * Scale + OuterWall + RoofEave * 2f,
+                   (FlatDepth + OuterWall) * Scale + OuterWall + RoofEave * 2f,
+                   root.GetComponentsInChildren<Room>(true));
         CreatePorch(root, outer, tile);
         CreateFurniture(root);
         CreateEstate(root, outer, outerFade, wood, tile);
@@ -4707,32 +4769,32 @@ public static class V01SceneBuilder
         WorldBox(site, "MechanicalFloor", -5.4f, -20.3f, 2.6f, -13.9f, 0.04f, 0f, concrete, false);
 
         WallRun(site, "GarageWall_S", new Vector3(2.6f, 0f, -25.1f + OuterWall * 0.5f), new Vector3(17f, 0f, -25.1f + OuterWall * 0.5f),
-                RoomHeight, OuterWall, wall, fade, NoCuts);
+                RoomHeight, OuterWall, wall, fade, NoCuts, true);
         WallRun(site, "GarageWall_N", new Vector3(2.6f, 0f, -13.9f - OuterWall * 0.5f), new Vector3(17f, 0f, -13.9f - OuterWall * 0.5f),
-                RoomHeight, OuterWall, wall, fade, NoCuts);
+                RoomHeight, OuterWall, wall, fade, NoCuts, true);
         WallRun(site, "GarageWall_E", new Vector3(17f - OuterWall * 0.5f, 0f, -25.1f), new Vector3(17f - OuterWall * 0.5f, 0f, -13.9f),
-                RoomHeight, OuterWall, wall, fade, new[] { new Vector2(5.6f / Scale, 5f / Scale) });
+                RoomHeight, OuterWall, wall, fade, new[] { new Vector2(5.6f / Scale, 5f / Scale) }, true);
         WallRun(site, "GarageWall_W_S", new Vector3(2.6f + OuterWall * 0.5f, 0f, -25.1f), new Vector3(2.6f + OuterWall * 0.5f, 0f, -20.3f),
-                RoomHeight, OuterWall, wall, fade, NoCuts);
+                RoomHeight, OuterWall, wall, fade, NoCuts, true);
         WallRun(site, "SharedWall", new Vector3(2.6f, 0f, -20.3f), new Vector3(2.6f, 0f, -13.9f),
                 RoomHeight, OuterWall, wall, fade, new[] { new Vector2(3.2f / Scale, DoorWidth) });
 
         WallRun(site, "MechanicalWall_W", new Vector3(-5.4f + OuterWall * 0.5f, 0f, -20.3f), new Vector3(-5.4f + OuterWall * 0.5f, 0f, -13.9f),
-                RoomHeight, OuterWall, wall, fade, NoCuts);
+                RoomHeight, OuterWall, wall, fade, NoCuts, true);
         WallRun(site, "MechanicalWall_S", new Vector3(-5.4f, 0f, -20.3f + OuterWall * 0.5f), new Vector3(2.6f, 0f, -20.3f + OuterWall * 0.5f),
-                RoomHeight, OuterWall, wall, fade, NoCuts);
+                RoomHeight, OuterWall, wall, fade, NoCuts, true);
         WallRun(site, "MechanicalWall_N", new Vector3(-5.4f, 0f, -13.9f - OuterWall * 0.5f), new Vector3(2.6f, 0f, -13.9f - OuterWall * 0.5f),
-                RoomHeight, OuterWall, wall, fade, new[] { new Vector2(4f / Scale, DoorWidth) });
+                RoomHeight, OuterWall, wall, fade, new[] { new Vector2(4f / Scale, DoorWidth) }, true);
 
         CreateOpening(site, "Door_GarageShutter", new Vector3(17f - OuterWall * 0.5f, 0f, -19.5f), Vector3.forward,
                       5f / Scale, 0f, DoorHeight, RoomHeight, OuterWall,
-                      wall, fade, metal, "차고 셔터", false);
+                      wall, fade, metal, "차고 셔터", false, true);
         CreateOpening(site, "Door_GarageMechanical", new Vector3(2.6f, 0f, -17.1f), Vector3.forward,
                       DoorWidth, 0f, DoorHeight, RoomHeight, OuterWall,
                       wall, fade, wood, "기계실문", false);
         CreateOpening(site, "Door_MechanicalOutside", new Vector3(-1.4f, 0f, -13.9f - OuterWall * 0.5f), Vector3.right,
                       DoorWidth, 0f, DoorHeight, RoomHeight, OuterWall,
-                      wall, fade, wood, "기계실 바깥문", false);
+                      wall, fade, wood, "기계실 바깥문", false, true);
 
         // 차고 서벽은 중간부터 공유벽이라 꺾인다. 직사각형 Room 은 더 안쪽 외벽 면에 맞춰 벽과 겹치지 않게 한다.
         float gx0 = (2.6f + OuterWall - ApartmentOrigin.x) / Scale;
@@ -4747,6 +4809,9 @@ public static class V01SceneBuilder
         FlatRoom(site, "기계실", mx0, mz0, mx1, mz1);
         CreateCeiling(site, "GarageCeiling", new Vector3(9.8f, 0f, -19.5f), 14.4f, 11.2f);
         CreateCeiling(site, "MechanicalCeiling", new Vector3(-1.4f, 0f, -17.1f), 8f, 6.4f);
+        CreateRoof(site, "EstateRoof", new Vector3(5.8f, 0f, -19.5f),
+                   22.4f + RoofEave * 2f, 11.2f + RoofEave * 2f,
+                   site.GetComponentsInChildren<Room>(true));
 
         // 셔터에서 공유문으로 가는 중앙 통로와 두 문 앞 1.2m는 비워 둔다.
         WorldBox(site, "GarageWorkbench", 8f, -14.8f, 12f, -14.2f, 0.9f, 0f, wood);
@@ -4817,15 +4882,15 @@ public static class V01SceneBuilder
 
     /// <summary>문 하나. 열림 상태가 통행과 시야를 같이 여닫는다 (CreateOpening 참고).</summary>
     static void Door(Transform parent, string name, Vector3 center, Vector3 axis, float thickness,
-                     Material wall, Material fade, Material pane, string label) =>
+                     Material wall, Material fade, Material pane, string label, bool exterior = false) =>
         CreateOpening(parent, name, center, axis, DoorWidth, 0f, DoorHeight, RoomHeight, thickness,
-                      wall, fade, pane, label, false);
+                      wall, fade, pane, label, false, exterior);
 
     /// <summary>창문 하나. 창턱이 남아 걸어서는 못 지나가고, 커튼이 달린다.</summary>
     static void Window(Transform parent, string name, Vector3 center, Vector3 axis, float width,
                        Material wall, Material fade, Material pane, string label) =>
         CreateOpening(parent, name, center, axis, width, WindowSillTop, WindowTop, RoomHeight, OuterWall,
-                      wall, fade, pane, label, true);
+                      wall, fade, pane, label, true, true);
 
     /// <summary>
     /// 기획 19항 현관 포치. 생존자들과 문을 사이에 두고 대치하는 무대다.
@@ -4850,16 +4915,9 @@ public static class V01SceneBuilder
             if (renderer) renderer.sharedMaterial = stone;
         }
 
-        var roof = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        roof.name = "Porch_Roof";
-        roof.transform.SetParent(porch, false);
-        roof.transform.position = Flat(9.37f, -1.35f) + Vector3.up * (RoomHeight + 0.1f);
-        roof.transform.localScale = new Vector3(4.50f * Scale, 0.2f, 2.25f * Scale);
-        var roofRenderer = roof.GetComponent<Renderer>();
-        if (roofRenderer) roofRenderer.sharedMaterial = stone;
-        // 지붕이 시야를 막으면 포치에 선 플레이어가 자기 발밑만 보게 된다.
-        int ignoreRaycast = LayerMask.NameToLayer("Ignore Raycast");
-        if (ignoreRaycast >= 0) roof.layer = ignoreRaycast;
+        CreateRoof(porch, "Porch_Roof", Flat(9.37f, -1.35f),
+                   4.50f * Scale, 2.25f * Scale,
+                   parent.GetComponentsInChildren<Room>(true));
     }
 
 
@@ -5214,6 +5272,31 @@ public static class V01SceneBuilder
     }
 
     /// <summary>
+    /// 보이는 평지붕. 콜라이더 없이 WallSegment 의 재질 교체만 재사용하고,
+    /// 소속 Room 은 빌더가 직접 묶어 런타임이 이름이나 좌표를 추측하지 않게 한다.
+    /// </summary>
+    static void CreateRoof(Transform parent, string name, Vector3 center, float width, float depth, Room[] rooms)
+    {
+        var opaque = EnsureSharedMaterial("flat_roof", new Color(0.13f, 0.14f, 0.16f));
+        var fade = EnsureFadeMaterial("flat_roof_fade", new Color(0.13f, 0.14f, 0.16f, 0.3f));
+
+        var roof = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        roof.name = name;
+        roof.transform.SetParent(parent, false);
+        roof.transform.position = center + Vector3.up * (RoomHeight + RoofThickness * 0.5f);
+        roof.transform.localScale = new Vector3(width, RoofThickness, depth);
+        roof.GetComponent<Renderer>().sharedMaterial = opaque;
+        Object.DestroyImmediate(roof.GetComponent<Collider>());
+
+        int ignoreRaycast = LayerMask.NameToLayer("Ignore Raycast");
+        if (ignoreRaycast >= 0) roof.layer = ignoreRaycast;
+
+        var segment = roof.AddComponent<WallSegment>();
+        segment.Setup(opaque, fade);
+        segment.BindRoof(rooms);
+    }
+
+    /// <summary>
     /// 보이지 않는 천장. 냉장고(2.4m) 같은 가구를 밟고 벽 위로 올라가 월담하는 걸 막는다.
     ///
     /// 렌더러가 없어 보이지 않고, 'Ignore Raycast' 레이어라 조준(PlayerAim) 과
@@ -5302,7 +5385,8 @@ public static class V01SceneBuilder
     /// 남은 구간은 2m 조각으로 쪼갠다 — 한 덩어리면 플레이어를 가릴 때 벽 전체가 흐려진다.
     /// </summary>
     static void WallRun(Transform parent, string name, Vector3 start, Vector3 end,
-                        float height, float thickness, Material wall, Material fade, Vector2[] cuts)
+                        float height, float thickness, Material wall, Material fade, Vector2[] cuts,
+                        bool exterior = false)
     {
         Vector3 delta = end - start;
         float length = delta.magnitude;
@@ -5328,7 +5412,7 @@ public static class V01SceneBuilder
             {
                 float center = spans[s].x + (p + 0.5f) * pieceLength;
                 CreateWallPiece(parent, name + "_" + index++, start + axis * center, axis,
-                                pieceLength, height, height * 0.5f, thickness, wall, fade);
+                                pieceLength, height, height * 0.5f, thickness, wall, fade, exterior);
             }
         }
     }
@@ -5343,7 +5427,7 @@ public static class V01SceneBuilder
     static void CreateOpening(Transform parent, string name, Vector3 center, Vector3 axis,
                               float width, float sillTop, float openTop, float wallHeight, float thickness,
                               Material wall, Material fade, Material paneMaterial,
-                              string label, bool vaultable)
+                              string label, bool vaultable, bool exterior = false)
     {
         // width 는 도면 단위로 받는다. 벽과 같이 늘어나야 구멍과 문짝이 어긋나지 않는다.
         width *= Scale;
@@ -5356,11 +5440,11 @@ public static class V01SceneBuilder
 
         if (sillTop > 0.01f)
             CreateWallPiece(parent, name + "_Sill", center, axis, width, sillTop,
-                            sillTop * 0.5f, thickness, wall, fade);
+                            sillTop * 0.5f, thickness, wall, fade, exterior);
 
         if (wallHeight - openTop > 0.01f)
             CreateWallPiece(parent, name + "_Lintel", center, axis, width, wallHeight - openTop,
-                            (wallHeight + openTop) * 0.5f, thickness, wall, fade);
+                            (wallHeight + openTop) * 0.5f, thickness, wall, fade, exterior);
 
         // 경첩을 구멍 한쪽 끝에 두고 판을 매단다. 열면 경첩이 돌아 판이 젖혀진다.
         var hinge = new GameObject("Hinge").transform;

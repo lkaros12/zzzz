@@ -6,7 +6,7 @@ using UnityEngine;
 /// 콜라이더도 건드리지 않는다. 벽을 끄거나 지우지 않고 알파만 내린다.
 ///
 /// 흐려지는 것은 "플레이어가 들어가 있는 방의 벽" 뿐이다.
-///  - 실외에 있으면 아무 벽도 흐려지지 않는다. 바깥에서 남의 집 속이 들여다보이면 안 된다.
+///  - 실외에서는 카메라와 플레이어 사이를 가리는 지붕과 바깥 벽 조각만 흐려진다.
 ///  - 실내에서도 다른 방의 벽은 그대로 둔다. 안 그러면 집 전체가 다 비쳐서 지금 어느 방에
 ///    있는지 읽히지 않는다 (기획 7항 "현재 있는 방의 내부를 쉽게 확인").
 ///
@@ -41,11 +41,62 @@ public class WallFader : MonoBehaviour
         if (!target) return;
 
         CurrentRoom = Room.At(target.position);
-        if (!CurrentRoom) return;   // 실외에서는 벽을 흐리지 않는다
+        UpdateRoofs();
+        if (!CurrentRoom)
+        {
+            FadeOutdoorOccluders();
+            return;
+        }
 
         CollectRoomWalls();
         FadeOccludingWalls();
         FadeFrontWalls();
+    }
+
+    /// <summary>현재 방과 빌더가 직접 묶어 둔 지붕만 숨긴다.</summary>
+    void UpdateRoofs()
+    {
+        var walls = WallSegment.All;
+        for (int i = 0; i < walls.Count; i++)
+            if (walls[i] && walls[i].IsRoof) walls[i].SetVisible(!walls[i].Covers(CurrentRoom));
+    }
+
+    /// <summary>실외에서는 실제로 가리는 외벽과 지붕만 흐린다.</summary>
+    void FadeOutdoorOccluders()
+    {
+        Vector3 delta = target.position - transform.position;
+        float distance = delta.magnitude;
+        if (distance < 0.1f) return;
+
+        Vector3 direction = delta / distance;
+        int count = Physics.SphereCastNonAlloc(transform.position, castRadius, direction, buffer,
+                                               distance, Vision.BlockerMask,
+                                               QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < count; i++)
+        {
+            var wall = buffer[i].collider ? buffer[i].collider.GetComponentInParent<WallSegment>() : null;
+            if (!wall || !wall.IsExterior || wall.IsRoof) continue;
+
+            wall.RequestFade();
+            FadedCount++;
+        }
+
+        var walls = WallSegment.All;
+        var ray = new Ray(transform.position, direction);
+        for (int i = 0; i < walls.Count; i++)
+        {
+            var roof = walls[i];
+            if (!roof || !roof.IsRoof) continue;
+
+            // 지붕은 콜라이더가 없어야 하므로 SphereCast 반경만큼 Bounds 를 넓혀 같은 선분으로 잰다.
+            var bounds = roof.Bounds;
+            bounds.Expand(castRadius * 2f);
+            float hitDistance;
+            if (!bounds.IntersectRay(ray, out hitDistance) || hitDistance > distance) continue;
+
+            roof.RequestFade();
+            FadedCount++;
+        }
     }
 
     /// <summary>지금 있는 방의 경계에 있는 벽 조각만 모은다.</summary>
@@ -55,7 +106,7 @@ public class WallFader : MonoBehaviour
         for (int i = 0; i < walls.Count; i++)
         {
             var wall = walls[i];
-            if (wall && CurrentRoom.Encloses(wall.Center, wallMargin)) roomWalls.Add(wall);
+            if (wall && !wall.IsRoof && CurrentRoom.Encloses(wall.Center, wallMargin)) roomWalls.Add(wall);
         }
     }
 
