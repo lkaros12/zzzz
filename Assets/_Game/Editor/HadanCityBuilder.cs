@@ -67,6 +67,9 @@ public static class HadanCityBuilder
         var clock = V01SceneBuilder.CreateGameClock();
         var player = V01SceneBuilder.CreatePlayer();
         player.transform.position = new Vector3(spawn.x, player.transform.position.y, spawn.y);
+        UnityEngine.Object.DestroyImmediate(player.GetComponent<DebugStartState>());
+        var arrival = new GameObject("Arrive_FromEstate");
+        arrival.transform.position = player.transform.position;
         V01SceneBuilder.CreateCamera(player.transform);
         V01SceneBuilder.CreateHud(player, clock);
 
@@ -79,6 +82,7 @@ public static class HadanCityBuilder
         for (int i = 0; i < meshes.Count; i++) StoreMesh(meshes[i]);
         AssetDatabase.SaveAssets();
         EditorSceneManager.SaveScene(scene, ScenePath);
+        V01SceneBuilder.EnsureBuildScenes();
         int triangles = CountUniqueMeshTriangles();
         Debug.Log("[Hadan] 건물 " + buildingCount + ", 도로 " + roadCount
                   + ", 삼각형 " + triangles.ToString("N0")
@@ -156,6 +160,24 @@ public static class HadanCityBuilder
             }
         }
         Check(spawnClear, "플레이어 시작 위치가 건물 콜라이더와 겹치지 않는다", ref failures);
+
+        var arrival = GameObject.Find("Arrive_FromEstate");
+        bool arrivalClear = arrival;
+        if (arrival)
+        {
+            var point = new Vector2(arrival.transform.position.x, arrival.transform.position.z);
+            foreach (var polygon in polygons.Values)
+                if (DistanceToPolygon(point, polygon) < 0.4f - Epsilon) { arrivalClear = false; break; }
+        }
+        Check(arrivalClear, "Arrive_FromEstate 가 있고 건물 콜라이더와 겹치지 않는다", ref failures);
+
+        var exits = UnityEngine.Object.FindObjectsByType<SceneExit>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        bool returnsToEstate = false;
+        for (int i = 0; i < exits.Length; i++)
+            if (exits[i].TargetSceneName == "V01_Sandbox") { returnsToEstate = true; break; }
+        Check(!returnsToEstate, "도시에 별장으로 가는 SceneExit 가 없다", ref failures);
+        Check(!UnityEngine.Object.FindFirstObjectByType<SaveSystem>(),
+              "도시는 SaveSystem 이 없어 별장 세이브를 덮어쓰지 않는다", ref failures);
 
         var navTriangles = NavMesh.CalculateTriangulation().indices.Length / 3;
         Check(navTriangles > 0, "NavMesh가 구워져 있다 (삼각형 " + navTriangles + ")", ref failures);

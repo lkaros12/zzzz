@@ -22,11 +22,6 @@ public class SaveSystem : MonoBehaviour
     [SerializeField] ZombieDefinition[] zombieTypes;
 
     PlayerStats stats;
-    PlayerInjuries injuries;
-    PlayerInventory inventory;
-    PlayerEquipment equipment;
-    PlayerQuickSlots quickSlots;
-    CharacterController playerController;
     Transform player;
 
     /// <summary>UI/디버그용 마지막 결과 메시지.</summary>
@@ -59,11 +54,6 @@ public class SaveSystem : MonoBehaviour
         if (!stats) return;
 
         player = stats.transform;
-        injuries = stats.GetComponent<PlayerInjuries>();
-        inventory = stats.GetComponent<PlayerInventory>();
-        equipment = stats.GetComponent<PlayerEquipment>();
-        quickSlots = stats.GetComponent<PlayerQuickSlots>();
-        playerController = stats.GetComponent<CharacterController>();
     }
 
     void Update()
@@ -95,49 +85,52 @@ public class SaveSystem : MonoBehaviour
         return true;
     }
 
-    SaveData Collect()
+    public SaveData CapturePlayerState()
+    {
+        if (!player) CachePlayer();
+        return player ? CapturePlayerState(stats, clock) : null;
+    }
+
+    public static SaveData CapturePlayerState(PlayerStats source, GameClock sourceClock)
     {
         var data = new SaveData();
-
-        if (clock)
+        if (sourceClock)
         {
-            data.day = clock.Day;
-            data.minuteOfDay = clock.MinuteOfDay;
+            data.day = sourceClock.Day;
+            data.minuteOfDay = sourceClock.MinuteOfDay;
         }
 
-        data.playerPosition = player.position;
-        data.playerYaw = player.eulerAngles.y;
+        if (!source) return data;
 
-        if (stats)
-        {
-            data.hp = stats.Hp;
-            data.stamina = stats.Stamina;
-            data.hunger = stats.Hunger;
-            data.thirst = stats.Thirst;
-            data.fatigue = stats.Fatigue;
-        }
+        data.playerPosition = source.transform.position;
+        data.playerYaw = source.transform.eulerAngles.y;
+        data.hp = source.Hp;
+        data.stamina = source.Stamina;
+        data.hunger = source.Hunger;
+        data.thirst = source.Thirst;
+        data.fatigue = source.Fatigue;
 
-        if (injuries)
-        {
+        var sourceInjuries = source.GetComponent<PlayerInjuries>();
+        if (sourceInjuries)
             for (int i = 0; i < PlayerInjuries.PartCount; i++)
             {
-                data.injuries[i] = (int)injuries.GetSeverity((BodyPart)i);
-                data.bleeding[i] = injuries.IsBleeding((BodyPart)i);
+                data.injuries[i] = (int)sourceInjuries.GetSeverity((BodyPart)i);
+                data.bleeding[i] = sourceInjuries.IsBleeding((BodyPart)i);
             }
-        }
 
-        if (inventory)
+        var sourceInventory = source.GetComponent<PlayerInventory>();
+        if (sourceInventory)
         {
-            var stacks = inventory.Stacks;
+            var stacks = sourceInventory.Stacks;
             for (int i = 0; i < stacks.Count; i++) data.inventory.Add(ToStackSave(stacks[i]));
         }
 
-        if (equipment)
+        var sourceEquipment = source.GetComponent<PlayerEquipment>();
+        if (sourceEquipment)
             for (int slot = 1; slot <= PlayerEquipment.SlotCount; slot++)
             {
-                var stack = equipment.GetStack((EquipmentSlot)slot);
+                var stack = sourceEquipment.GetStack((EquipmentSlot)slot);
                 if (stack == null || !stack.definition) continue;
-
                 data.equipment.Add(new EquipSave
                 {
                     slot = slot, id = stack.definition.id,
@@ -145,9 +138,17 @@ public class SaveSystem : MonoBehaviour
                 });
             }
 
-        if (quickSlots)
+        var sourceQuickSlots = source.GetComponent<PlayerQuickSlots>();
+        if (sourceQuickSlots)
             for (int i = 0; i < PlayerQuickSlots.ConsumableSlotCount; i++)
-                data.quickSlots[i] = quickSlots.GetConsumableId(i);
+                data.quickSlots[i] = sourceQuickSlots.GetConsumableId(i);
+
+        return data;
+    }
+
+    SaveData Collect()
+    {
+        var data = CapturePlayerState(stats, clock);
 
         // GDD 25항: 컨테이너 내용물.
         foreach (var container in FindObjectsByType<WorldContainer>(FindObjectsSortMode.None))
@@ -263,45 +264,60 @@ public class SaveSystem : MonoBehaviour
 
     void Restore(SaveData data)
     {
-        player.GetComponent<PlayerConsumer>()?.ResetMedicalState();
-        if (clock) clock.LoadState(data.day, data.minuteOfDay);
-
-        // CharacterController 가 붙어 있으면 transform 을 직접 옮기기 전에 끄는 편이 안전하다.
-        if (playerController) playerController.enabled = false;
-        player.position = data.playerPosition;
-        player.rotation = Quaternion.Euler(0f, data.playerYaw, 0f);
-        if (playerController) playerController.enabled = true;
-
-        if (stats) stats.LoadState(data.hp, data.stamina, data.hunger, data.thirst, data.fatigue);
-
-        if (injuries)
-        {
-            injuries.ClearAll();
-            if (data.injuries != null)
-                for (int i = 0; i < data.injuries.Length && i < PlayerInjuries.PartCount; i++)
-                    injuries.Apply((BodyPart)i, (InjurySeverity)data.injuries[i]);
-            if (data.bleeding != null)
-                for (int i = 0; i < data.bleeding.Length && i < PlayerInjuries.PartCount; i++)
-                    injuries.SetBleeding((BodyPart)i, data.bleeding[i]);
-        }
-
-        RestoreInventory(data);
-        RestoreEquipment(data);
-        RestoreQuickSlots(data);
+        RestorePlayerState(data, catalog, stats, clock);
         RestoreContainers(data);
         RestoreWorldItems(data);
         RestoreZombies(data);
     }
 
-    void RestoreInventory(SaveData data)
+    public static bool RestorePlayerState(SaveData data, ItemCatalog itemCatalog, PlayerStats target,
+                                          GameClock targetClock, Transform arrival = null)
     {
-        if (!inventory) return;
+        if (data == null || !itemCatalog || !target) return false;
 
-        inventory.Clear();
+        var targetPlayer = target.transform;
+        var targetInjuries = target.GetComponent<PlayerInjuries>();
+        var targetInventory = target.GetComponent<PlayerInventory>();
+        var targetEquipment = target.GetComponent<PlayerEquipment>();
+        var targetQuickSlots = target.GetComponent<PlayerQuickSlots>();
+        var controller = target.GetComponent<CharacterController>();
+
+        target.GetComponent<PlayerConsumer>()?.ResetMedicalState();
+        if (targetClock) targetClock.LoadState(data.day, data.minuteOfDay);
+
+        // CharacterController 가 켜진 채 옮기면 물리 갱신에서 이전 위치로 되돌아갈 수 있다.
+        if (controller) controller.enabled = false;
+        targetPlayer.position = arrival ? arrival.position : data.playerPosition;
+        targetPlayer.rotation = Quaternion.Euler(0f, data.playerYaw, 0f);
+        if (controller) controller.enabled = true;
+
+        target.LoadState(data.hp, data.stamina, data.hunger, data.thirst, data.fatigue);
+        if (targetInjuries)
+        {
+            targetInjuries.ClearAll();
+            if (data.injuries != null)
+                for (int i = 0; i < data.injuries.Length && i < PlayerInjuries.PartCount; i++)
+                    targetInjuries.Apply((BodyPart)i, (InjurySeverity)data.injuries[i]);
+            if (data.bleeding != null)
+                for (int i = 0; i < data.bleeding.Length && i < PlayerInjuries.PartCount; i++)
+                    targetInjuries.SetBleeding((BodyPart)i, data.bleeding[i]);
+        }
+
+        RestoreInventory(data, itemCatalog, targetInventory);
+        RestoreEquipment(data, itemCatalog, targetEquipment);
+        RestoreQuickSlots(data, itemCatalog, targetQuickSlots);
+        return true;
+    }
+
+    static void RestoreInventory(SaveData data, ItemCatalog itemCatalog, PlayerInventory targetInventory)
+    {
+        if (!targetInventory) return;
+
+        targetInventory.Clear();
         for (int i = 0; i < data.inventory.Count; i++)
         {
             var entry = data.inventory[i];
-            var definition = catalog.Find(entry.id);
+            var definition = itemCatalog.Find(entry.id);
             if (!definition) continue;
 
             var stack = new ItemStack
@@ -314,36 +330,36 @@ public class SaveSystem : MonoBehaviour
             };
 
             // 저장된 좌표에 못 놓으면(격자 크기가 바뀐 경우 등) 빈 자리에라도 넣어 아이템을 잃지 않게 한다.
-            if (!inventory.PlaceExact(stack)) inventory.TryPlaceStack(stack);
+            if (!targetInventory.PlaceExact(stack)) targetInventory.TryPlaceStack(stack);
         }
     }
 
-    void RestoreEquipment(SaveData data)
+    static void RestoreEquipment(SaveData data, ItemCatalog itemCatalog, PlayerEquipment targetEquipment)
     {
-        if (!equipment) return;
+        if (!targetEquipment) return;
 
-        equipment.StripAll();
+        targetEquipment.StripAll();
         for (int i = 0; i < data.equipment.Count; i++)
         {
-            var definition = catalog.Find(data.equipment[i].id);
+            var definition = itemCatalog.Find(data.equipment[i].id);
             if (!definition) continue;
 
             int durability = data.equipment[i].durability < 0 ? definition.maxDurability : data.equipment[i].durability;
-            equipment.LoadEquip((EquipmentSlot)data.equipment[i].slot, definition, durability);
+            targetEquipment.LoadEquip((EquipmentSlot)data.equipment[i].slot, definition, durability);
 
-            var loaded = equipment.GetStack((EquipmentSlot)data.equipment[i].slot);
+            var loaded = targetEquipment.GetStack((EquipmentSlot)data.equipment[i].slot);
             if (loaded != null)
                 loaded.loadedAmmo = data.equipment[i].loadedAmmo < 0
                     ? definition.magazineSize : data.equipment[i].loadedAmmo;
         }
     }
 
-    void RestoreQuickSlots(SaveData data)
+    static void RestoreQuickSlots(SaveData data, ItemCatalog itemCatalog, PlayerQuickSlots targetQuickSlots)
     {
-        if (!quickSlots || data.quickSlots == null) return;
+        if (!targetQuickSlots || data.quickSlots == null) return;
 
         for (int i = 0; i < PlayerQuickSlots.ConsumableSlotCount && i < data.quickSlots.Length; i++)
-            quickSlots.LoadConsumable(i, catalog.Find(data.quickSlots[i]));
+            targetQuickSlots.LoadConsumable(i, itemCatalog.Find(data.quickSlots[i]));
     }
 
     /// <summary>GDD 25항 컨테이너 내용물 복원. 컨테이너 자체는 씬에 고정돼 있어 다시 만들지 않는다.</summary>

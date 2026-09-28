@@ -15,6 +15,7 @@ public static class V01SceneBuilder
 {
     const string SceneFolder = "Assets/_Game/Scenes";
     const string ScenePath = SceneFolder + "/V01_Sandbox.unity";
+    const string CityScenePath = SceneFolder + "/V01_City_Hadan.unity";
     const string ItemDataFolder = "Assets/_Game/Data/Items";
     const string MaterialFolder = "Assets/_Game/Data/Materials";
     const string ZombieDataFolder = "Assets/_Game/Data/Zombies";
@@ -88,8 +89,41 @@ public static class V01SceneBuilder
 
         Directory.CreateDirectory(SceneFolder);
         EditorSceneManager.SaveScene(scene, ScenePath);
+        EnsureBuildScenes();
         AssetDatabase.Refresh();
         Debug.Log("[V0.1] 샌드박스 씬 생성 완료: " + ScenePath);
+    }
+
+    internal static void EnsureBuildScenes()
+    {
+        string[] required = { ScenePath, CityScenePath };
+        var scenes = new System.Collections.Generic.List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);
+        bool changed = false;
+
+        for (int r = 0; r < required.Length; r++)
+        {
+            int found = scenes.FindIndex(scene => scene.path == required[r]);
+            if (found < 0)
+            {
+                scenes.Add(new EditorBuildSettingsScene(required[r], true));
+                changed = true;
+            }
+            else if (!scenes[found].enabled)
+            {
+                scenes[found] = new EditorBuildSettingsScene(required[r], true);
+                changed = true;
+            }
+        }
+
+        if (changed) EditorBuildSettings.scenes = scenes.ToArray();
+    }
+
+    static bool BuildSettingsContains(string path)
+    {
+        var scenes = EditorBuildSettings.scenes;
+        for (int i = 0; i < scenes.Length; i++)
+            if (scenes[i].enabled && scenes[i].path == path) return true;
+        return false;
     }
 
     internal static void CreateLight()
@@ -1821,6 +1855,7 @@ public static class V01SceneBuilder
             CheckMedicalTreatmentUI();
             CheckCombat();
             CheckSaveRoundTrip();
+            CheckSceneTransferRoundTrip();
             CheckWeaponsAndDurability();
             CheckRangedAndQuickSlots();
             CheckZombieTypesAndCombat();
@@ -2403,6 +2438,64 @@ public static class V01SceneBuilder
             Check(catalog.Count > 0, "아이템 카탈로그가 비어 있지 않다");
             Check(catalog.Find("water_bottle") != null, "카탈로그에서 id 로 아이템을 찾는다");
             Check(catalog.Find("없는id") == null, "없는 id 는 null");
+        }
+    }
+
+    static void CheckSceneTransferRoundTrip()
+    {
+        var catalog = AssetDatabase.LoadAssetAtPath<ItemCatalog>(ItemDataFolder + "/ItemCatalog.asset");
+        var water = catalog ? catalog.Find("water_bottle") : null;
+        var source = new GameObject("__SceneTransferSource");
+        var target = new GameObject("__SceneTransferTarget");
+        var sourceClockObject = new GameObject("__SceneTransferSourceClock");
+        var targetClockObject = new GameObject("__SceneTransferTargetClock");
+        var arrival = new GameObject("__SceneTransferArrival");
+        try
+        {
+            var sourceStats = source.AddComponent<PlayerStats>();
+            sourceStats.ResetStats();
+            sourceStats.LoadState(63f, 41f, 72f, 55f, 33f);
+            var sourceInventory = source.AddComponent<PlayerInventory>();
+            source.AddComponent<PlayerEquipment>();
+            var sourceInjuries = source.AddComponent<PlayerInjuries>();
+            source.AddComponent<PlayerQuickSlots>();
+            sourceInjuries.Apply(BodyPart.LeftLeg, InjurySeverity.Serious);
+            sourceInjuries.SetBleeding(BodyPart.RightArm, true);
+            if (water) sourceInventory.Add(water, 2);
+            Check(water, "씬 이동 검사 아이템이 있다");
+
+            var sourceClock = sourceClockObject.AddComponent<GameClock>();
+            sourceClock.LoadState(7, 805f);
+            var state = SaveSystem.CapturePlayerState(sourceStats, sourceClock);
+
+            var targetStats = target.AddComponent<PlayerStats>();
+            targetStats.ResetStats();
+            var targetInventory = target.AddComponent<PlayerInventory>();
+            target.AddComponent<PlayerEquipment>();
+            var targetInjuries = target.AddComponent<PlayerInjuries>();
+            target.AddComponent<PlayerQuickSlots>();
+            target.AddComponent<CharacterController>();
+            var targetClock = targetClockObject.AddComponent<GameClock>();
+            arrival.transform.position = new Vector3(8f, 1.05f, -3f);
+
+            Check(SaveSystem.RestorePlayerState(state, catalog, targetStats, targetClock, arrival.transform),
+                  "씬 이동 플레이어 상태 복원 성공");
+            Check(Mathf.Approximately(targetStats.Hp, sourceStats.Hp), "씬 이동 체력 보존");
+            Check(sourceInventory.Stacks.Count > 0
+                  && targetInventory.Stacks.Count == sourceInventory.Stacks.Count,
+                  "씬 이동 인벤토리 개수 보존");
+            Check(targetInjuries.GetSeverity(BodyPart.LeftLeg) == InjurySeverity.Serious,
+                  "씬 이동 부상 보존");
+            Check(targetInjuries.IsBleeding(BodyPart.RightArm), "씬 이동 출혈 보존");
+            Check(target.transform.position == arrival.transform.position, "씬 이동 도착 지점 배치");
+        }
+        finally
+        {
+            Object.DestroyImmediate(arrival);
+            Object.DestroyImmediate(targetClockObject);
+            Object.DestroyImmediate(sourceClockObject);
+            Object.DestroyImmediate(target);
+            Object.DestroyImmediate(source);
         }
     }
 
@@ -4023,6 +4116,24 @@ public static class V01SceneBuilder
         Check(GameObject.Find("GarageCeiling") && GameObject.Find("MechanicalCeiling"),
               "차고와 기계실에 월담 방지 천장이 있다");
 
+        var exit = GameObject.Find("Exit_ToCity");
+        var trigger = exit ? exit.GetComponent<BoxCollider>() : null;
+        var sceneExit = exit ? exit.GetComponent<SceneExit>() : null;
+        Check(exit && trigger && trigger.isTrigger, "Exit_ToCity 가 대문 바깥 트리거다");
+        if (exit && trigger)
+        {
+            Bounds bounds = trigger.bounds;
+            Check(bounds.min.x <= 23.8f && bounds.max.x >= 30.2f
+                  && bounds.max.z < -30.1f && Mathf.Abs(bounds.center.z + 33.1f) < 0.05f
+                  && Mathf.Abs(bounds.size.z - 2f) < 0.05f,
+                  "Exit_ToCity 가 대문 폭이고 남쪽 3m 바깥에 있다");
+            CheckReachable(new Vector3(27f, 0f, -16f), exit.transform.position,
+                           "마당 → Exit_ToCity");
+        }
+        Check(sceneExit && sceneExit.TargetSceneName == "V01_City_Hadan",
+              "Exit_ToCity 대상이 하단 도시다");
+        Check(BuildSettingsContains(CityScenePath), "하단 도시 씬이 Build Settings 에 있다");
+
         var rigs = Object.FindObjectsByType<HouseLightRig>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         Check(rigs.Length == 1, "HouseLightRig 는 씬에 하나다");
     }
@@ -4944,6 +5055,16 @@ public static class V01SceneBuilder
         WorldBox(site, "Fence_S_E", 30.2f, -30.2f, 58f, -30f, 2f, 0f, metal);
         WorldBox(site, "GatePost_W", 23.5f, -30.3f, 23.8f, -29.9f, 2.3f, 0f, metal);
         WorldBox(site, "GatePost_E", 30.2f, -30.3f, 30.5f, -29.9f, 2.3f, 0f, metal);
+
+        var exit = new GameObject("Exit_ToCity");
+        exit.transform.SetParent(site, false);
+        exit.transform.position = new Vector3(27f, 1f, -33.1f);
+        var trigger = exit.AddComponent<BoxCollider>();
+        trigger.size = new Vector3(6.4f, 2f, 2f);
+        trigger.isTrigger = true;
+        exit.AddComponent<SceneExit>().Setup("V01_City_Hadan", "Arrive_FromEstate");
+        WorldBox(site, "Exit_ToCity_Marker", 23.8f, -34.1f, 30.2f, -32.1f, 0.06f, 0f,
+                 EnsureSharedMaterial("scene_exit", new Color(1f, 0.62f, 0.05f)), false);
 
         WorldBox(site, "GarageFloor", 2.6f, -25.1f, 17f, -13.9f, 0.04f, 0f, concrete, false);
         WorldBox(site, "MechanicalFloor", -5.4f, -20.3f, 2.6f, -13.9f, 0.04f, 0f, concrete, false);

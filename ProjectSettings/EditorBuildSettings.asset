@@ -8,6 +8,12 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/SampleScene.unity
     guid: 99c9720ab356a0642a771bea13969a05
+  - enabled: 1
+    path: Assets/_Game/Scenes/V01_Sandbox.unity
+    guid: 9b6cfdd88c6b9cb4e9c139277b9b935b
+  - enabled: 1
+    path: Assets/_Game/Scenes/V01_City_Hadan.unity
+    guid: e8102747d92922d4598bbbb7e7c033e5
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0
