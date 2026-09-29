@@ -2748,10 +2748,9 @@ public static class V01SceneBuilder
               "회피는 좌Ctrl 로 옮겨졌다 (기획서 7·15항 0.5초 무적 유지)");
         Check(typeof(PlayerMotor).GetProperty("IsAirborne") != null, "공중 상태를 노출한다");
 
-        // ---- 총은 즉발 직선, 근접만 부채꼴 ----
+        // ---- 총은 즉발 직선, 근접 막대기는 없음 ----
         var combatSource = System.IO.File.ReadAllText("Assets/_Game/Scripts/Combat/PlayerCombat.cs");
-        Check(combatSource.Contains("if (swingFx && !(useWeapon && weapon.ranged)) swingFx.Play("),
-              "부채꼴 스윙은 근접 무기만 재생한다");
+        Check(!combatSource.Contains("swingFx.Play("), "근접 막대기가 없다");
         Check(combatSource.Contains("swingFx.PlayTracer(transform.position, transform.position + direction * travel)"),
               "총은 실제 판정 선과 같은 궤적을 그린다");
         Check(typeof(AttackSwingFx).GetMethod("PlayTracer") != null, "즉발 직선 궤적이 있다");
@@ -3499,19 +3498,28 @@ public static class V01SceneBuilder
 
         var controller = AssetDatabase.LoadAssetAtPath<UnityEditor.Animations.AnimatorController>(PlayerControllerPath);
         Check(controller, "Player.controller가 있다");
-        Check(controller.parameters.Length == 5, "Player.controller 파라미터가 5개다");
+        Check(controller.parameters.Length == 6, "Player.controller 파라미터가 6개다");
         Check(HasParameter(controller, "MoveX", AnimatorControllerParameterType.Float), "플레이어 MoveX 파라미터");
         Check(HasParameter(controller, "MoveZ", AnimatorControllerParameterType.Float), "플레이어 MoveZ 파라미터");
         Check(HasParameter(controller, "Attack", AnimatorControllerParameterType.Trigger), "플레이어 Attack 파라미터");
         Check(HasParameter(controller, "AttackOneHand", AnimatorControllerParameterType.Trigger), "플레이어 AttackOneHand 파라미터");
+        Check(HasParameter(controller, "AttackSpeed", AnimatorControllerParameterType.Float), "플레이어 AttackSpeed 파라미터");
         Check(HasParameter(controller, "Dead", AnimatorControllerParameterType.Bool), "플레이어 Dead 파라미터");
 
         var states = controller.layers[0].stateMachine.states;
         Check(states.Length == 4, "플레이어 상태가 4개다");
         var locomotionState = FindState(states, "Locomotion");
         Check(locomotionState != null, "Locomotion 상태가 있다");
-        Check(FindState(states, "Attack") != null, "Attack 상태가 있다");
-        Check(FindState(states, "AttackOneHand") != null, "AttackOneHand 상태가 있다");
+        var attackState = FindState(states, "Attack");
+        var attackOneHandState = FindState(states, "AttackOneHand");
+        Check(attackState != null, "Attack 상태가 있다");
+        Check(attackOneHandState != null, "AttackOneHand 상태가 있다");
+        Check(attackState.speedParameterActive && attackState.speedParameter == "AttackSpeed"
+              && attackOneHandState.speedParameterActive && attackOneHandState.speedParameter == "AttackSpeed",
+              "두 공격 상태의 재생 속도가 AttackSpeed 파라미터를 따른다");
+        Check(Mathf.Approximately(PlayerAnimator.CalculateAttackSpeed(1.5f, 0.8f), 1.875f)
+              && Mathf.Approximately(PlayerAnimator.CalculateAttackSpeed(1.5f, 2f), 1f),
+              "공격 간격에 맞춘 재생 속도를 계산한다");
         Check(FindState(states, "Death") != null, "Death 상태가 있다");
         var locomotion = locomotionState.motion as UnityEditor.Animations.BlendTree;
         Check(locomotion && locomotion.blendType == UnityEditor.Animations.BlendTreeType.FreeformDirectional2D,
@@ -5188,6 +5196,12 @@ public static class V01SceneBuilder
         controller.AddParameter("MoveZ", AnimatorControllerParameterType.Float);
         controller.AddParameter("Attack", AnimatorControllerParameterType.Trigger);
         controller.AddParameter("AttackOneHand", AnimatorControllerParameterType.Trigger);
+        controller.AddParameter(new AnimatorControllerParameter
+        {
+            name = "AttackSpeed",
+            type = AnimatorControllerParameterType.Float,
+            defaultFloat = 1f
+        });
         controller.AddParameter("Dead", AnimatorControllerParameterType.Bool);
 
         var machine = controller.layers[0].stateMachine;
@@ -5217,8 +5231,12 @@ public static class V01SceneBuilder
         locomotionState.iKOnFeet = true;
         var attackState = machine.AddState("Attack");
         attackState.motion = attack;
+        attackState.speedParameter = "AttackSpeed";
+        attackState.speedParameterActive = true;
         var attackOneHandState = machine.AddState("AttackOneHand");
         attackOneHandState.motion = attackOneHand;
+        attackOneHandState.speedParameter = "AttackSpeed";
+        attackOneHandState.speedParameterActive = true;
         var deathState = machine.AddState("Death");
         deathState.motion = death;
         machine.defaultState = locomotionState;

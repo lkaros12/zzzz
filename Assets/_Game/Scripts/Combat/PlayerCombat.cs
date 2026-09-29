@@ -60,6 +60,9 @@ public class PlayerCombat : MonoBehaviour
     /// <summary>실제로 공격을 시작한 마지막 시각. 애니메이션은 이 값을 읽기만 한다.</summary>
     public float LastAttackTime { get; private set; }
 
+    /// <summary>마지막으로 시작한 공격의 간격. 애니메이션 속도 계산에 쓴다.</summary>
+    public float AttackInterval { get; private set; }
+
     public bool IsAttacking => Time.time < nextAttackTime[0] || Time.time < nextAttackTime[1];
 
     /// <summary>UI 에 띄우는 마지막 결과 메시지 (파손 등).</summary>
@@ -234,6 +237,7 @@ public class PlayerCombat : MonoBehaviour
         if (useWeapon && weaponStack.UsesAmmo) weaponStack.loadedAmmo--;
 
         nextAttackTime[handIndex] = Time.time + interval;
+        AttackInterval = interval;
         LastAttackTime = Time.time;
 
         float range = (useWeapon ? weapon.attackRange : unarmedRange) + rangePadding;
@@ -252,9 +256,6 @@ public class PlayerCombat : MonoBehaviour
 
         // 무기별 부채꼴. 총은 좁고 산탄총은 넓다.
         float halfAngle = useWeapon && weapon.attackSpread > 0f ? weapon.attackSpread : attackHalfAngle;
-
-        // 근접은 판정과 같은 부채꼴로 휘두른다. 총은 즉발이라 HitScan 안에서 직선 궤적을 그린다.
-        if (swingFx && !(useWeapon && weapon.ranged)) swingFx.Play(range, halfAngle, twoHanded);
 
         // GDD 18항: 공격은 소리를 낸다. 맞았든 빗나갔든 소음은 발생한다.
         // 사용자 요구: 실내에서 낸 소리는 벽을 넘지 않지만 총성만은 예외다.

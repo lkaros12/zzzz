@@ -11,6 +11,7 @@ public class PlayerAnimator : MonoBehaviour
     static readonly int MoveZId = Animator.StringToHash("MoveZ");
     static readonly int AttackId = Animator.StringToHash("Attack");
     static readonly int AttackOneHandId = Animator.StringToHash("AttackOneHand");
+    static readonly int AttackSpeedId = Animator.StringToHash("AttackSpeed");
     static readonly int DeadId = Animator.StringToHash("Dead");
 
     [Tooltip("PlayerMotor의 걷기 속도(m/s). 이 속도를 이동 블렌드 1로 본다.")]
@@ -28,6 +29,8 @@ public class PlayerAnimator : MonoBehaviour
     Vector3 lastPosition;
     Vector2 movement;
     float seenAttackTime;
+    float attackClipLength = 1f;
+    float attackOneHandClipLength = 1f;
     bool reportedDead;
 
     void Awake()
@@ -40,6 +43,15 @@ public class PlayerAnimator : MonoBehaviour
         grapple = GetComponent<PlayerGrapple>();
         assassinate = GetComponent<PlayerAssassinate>();
         animator = GetComponentInChildren<Animator>();
+        if (animator && animator.runtimeAnimatorController)
+        {
+            var clips = animator.runtimeAnimatorController.animationClips;
+            for (int i = 0; i < clips.Length; i++)
+            {
+                if (clips[i].name == "Attack") attackClipLength = clips[i].length;
+                else if (clips[i].name == "AttackOneHand") attackOneHandClipLength = clips[i].length;
+            }
+        }
         lastPosition = transform.position;
         seenAttackTime = combat.LastAttackTime;
         reportedDead = stats.IsDead;
@@ -82,10 +94,15 @@ public class PlayerAnimator : MonoBehaviour
         {
             seenAttackTime = combat.LastAttackTime;
             bool oneHanded = PlayerEquipment.IsOneHandedMelee(equipment.Get(EquipmentSlot.MainHand));
+            animator.SetFloat(AttackSpeedId, CalculateAttackSpeed(
+                oneHanded ? attackOneHandClipLength : attackClipLength, combat.AttackInterval));
             animator.ResetTrigger(oneHanded ? AttackId : AttackOneHandId);
             animator.SetTrigger(oneHanded ? AttackOneHandId : AttackId);
         }
     }
+
+    public static float CalculateAttackSpeed(float clipLength, float interval)
+        => Mathf.Max(1f, clipLength / interval);
 
     public static bool IsTeleport(Vector3 delta, float deltaTime, float runSpeed)
     {
