@@ -351,17 +351,16 @@ public static class V01SceneBuilder
         cc.center = Vector3.zero;
         cc.height = PlayerHeight;
         // 지름 1m 는 실제 문(1.0m) 을 못 지난다. 사람 어깨폭에 가깝게 줄였다.
-        cc.radius = 0.32f;
+        cc.radius = 0.26f;
         cc.slopeLimit = 45f;
         // NavMesh 가 올라갈 수 있다고 보는 높이와 맞춘다 (경로/물리 불일치 방지).
         cc.stepOffset = AgentClimb();
 
         var visual = (GameObject)PrefabUtility.InstantiatePrefab(model, player.transform);
         visual.name = "Model";
-        // character01 원점은 발밑이므로 콜라이더 아래끝까지 내린다.
-        visual.transform.localPosition = Vector3.down * (PlayerHeight * 0.5f);
+        visual.transform.localPosition = Vector3.up * (cc.center.y - cc.height / 2f);
         visual.transform.localRotation = Quaternion.identity;
-        visual.transform.localScale = Vector3.one * (PlayerHeight / MeasureModelHeight(model));
+        visual.transform.localScale = Vector3.one * (PlayerHeight / MeasurePlayerModelHeight(model));
         ApplyPlayerMaterials(visual);
 
         var animator = visual.GetComponentInChildren<Animator>();
@@ -414,7 +413,9 @@ public static class V01SceneBuilder
 
         player.AddComponent<PlayerGrapple>();
         player.AddComponent<PlayerCombat>();
-        player.AddComponent<PlayerAnimator>();
+        var playerAnimator = player.AddComponent<PlayerAnimator>();
+        var lookAtRelay = animator.gameObject.AddComponent<PlayerLookAtRelay>();
+        lookAtRelay.Bind(playerAnimator);
         player.AddComponent<PlayerDeath>();
 
         // 테스트용 시작 상태. 실제 시작 상태가 정해지면 이 줄과 DebugStartState.cs 를 지운다.
@@ -2398,7 +2399,7 @@ public static class V01SceneBuilder
         var data = new SaveData();
         data.day = 7;
         data.minuteOfDay = 13f * 60f + 25f;
-        data.playerPosition = new Vector3(12.5f, 1.05f, -8.25f);
+        data.playerPosition = new Vector3(12.5f, BodyY, -8.25f);
         data.playerYaw = 135f;
         data.hp = 63.5f;
         data.stamina = 41.25f;
@@ -2507,7 +2508,7 @@ public static class V01SceneBuilder
             target.AddComponent<PlayerQuickSlots>();
             target.AddComponent<CharacterController>();
             var targetClock = targetClockObject.AddComponent<GameClock>();
-            arrival.transform.position = new Vector3(8f, 1.05f, -3f);
+            arrival.transform.position = new Vector3(8f, BodyY, -3f);
 
             Check(SaveSystem.RestorePlayerState(state, catalog, targetStats, targetClock, arrival.transform),
                   "씬 이동 플레이어 상태 복원 성공");
@@ -3487,32 +3488,46 @@ public static class V01SceneBuilder
         Check(string.IsNullOrEmpty(HumanBoneName(avatar.humanDescription, "LeftEye")), "character01 LeftEye가 머리카락 본에 매핑되지 않았다");
         Check(string.IsNullOrEmpty(HumanBoneName(avatar.humanDescription, "RightEye")), "character01 RightEye가 머리카락 본에 매핑되지 않았다");
         Check(string.IsNullOrEmpty(HumanBoneName(avatar.humanDescription, "Jaw")), "character01 Jaw가 머리카락 본에 매핑되지 않았다");
+        Check(HumanBoneName(avatar.humanDescription, "LeftFoot") == "mixamorig:LeftFoot"
+              && HumanBoneName(avatar.humanDescription, "RightFoot") == "mixamorig:RightFoot",
+              "character01 발 본 매핑이 맞다");
+        Check(HumanBoneName(avatar.humanDescription, "LeftToes") == "mixamorig:LeftToeBase"
+              && HumanBoneName(avatar.humanDescription, "RightToes") == "mixamorig:RightToeBase",
+              "character01 발가락 본 매핑이 맞다");
         Check(AssetDatabase.FindAssets("t:Texture2D", new[] { PlayerTextureFolder }).Length > 0,
               "character01 내장 텍스처가 Textures 폴더에 추출됐다");
 
         var controller = AssetDatabase.LoadAssetAtPath<UnityEditor.Animations.AnimatorController>(PlayerControllerPath);
         Check(controller, "Player.controller가 있다");
-        Check(controller.parameters.Length == 4, "Player.controller 파라미터가 4개다");
-        Check(HasParameter(controller, "Speed", AnimatorControllerParameterType.Float), "플레이어 Speed 파라미터");
+        Check(controller.parameters.Length == 5, "Player.controller 파라미터가 5개다");
+        Check(HasParameter(controller, "MoveX", AnimatorControllerParameterType.Float), "플레이어 MoveX 파라미터");
+        Check(HasParameter(controller, "MoveZ", AnimatorControllerParameterType.Float), "플레이어 MoveZ 파라미터");
         Check(HasParameter(controller, "Attack", AnimatorControllerParameterType.Trigger), "플레이어 Attack 파라미터");
         Check(HasParameter(controller, "AttackOneHand", AnimatorControllerParameterType.Trigger), "플레이어 AttackOneHand 파라미터");
         Check(HasParameter(controller, "Dead", AnimatorControllerParameterType.Bool), "플레이어 Dead 파라미터");
 
         var states = controller.layers[0].stateMachine.states;
-        Check(states.Length == 6, "플레이어 상태가 6개다");
-        for (int i = 0; i < PlayerClipNames.Length; i++)
-            Check(FindState(states, PlayerClipNames[i]) != null, PlayerClipNames[i] + " 상태가 있다");
+        Check(states.Length == 4, "플레이어 상태가 4개다");
+        var locomotionState = FindState(states, "Locomotion");
+        Check(locomotionState != null, "Locomotion 상태가 있다");
+        Check(FindState(states, "Attack") != null, "Attack 상태가 있다");
+        Check(FindState(states, "AttackOneHand") != null, "AttackOneHand 상태가 있다");
+        Check(FindState(states, "Death") != null, "Death 상태가 있다");
+        var locomotion = locomotionState.motion as UnityEditor.Animations.BlendTree;
+        Check(locomotion && locomotion.blendType == UnityEditor.Animations.BlendTreeType.FreeformDirectional2D,
+              "Locomotion이 2D Freeform Directional 블렌드 트리다");
+        Check(locomotion.blendParameter == "MoveX" && locomotion.blendParameterY == "MoveZ",
+              "Locomotion 파라미터가 MoveX/MoveZ다");
+        Check(locomotion.children.Length == PlayerLocomotionClipCount, "Locomotion 점이 9개다");
 
         var missing = new System.Collections.Generic.List<string>();
         for (int i = 0; i < PlayerClipNames.Length; i++)
         {
             string path = PlayerCharacterFolder + "/character01@" + PlayerClipNames[i] + ".fbx";
             var importer = AssetImporter.GetAtPath(path) as ModelImporter;
-            var state = FindState(states, PlayerClipNames[i]);
             if (!importer)
             {
                 missing.Add(PlayerClipNames[i]);
-                Check(state.motion == null, PlayerClipNames[i] + " 클립이 없어 상태 모션이 비어 있다");
                 continue;
             }
 
@@ -3528,14 +3543,26 @@ public static class V01SceneBuilder
             Check(settings.Length > 0, PlayerClipNames[i] + ": 클립 설정이 있다");
             for (int c = 0; c < settings.Length; c++)
             {
-                Check(settings[c].loopTime == (i < 3), PlayerClipNames[i] + ": 루프 설정이 맞다");
+                Check(settings[c].loopTime == (i < PlayerLocomotionClipCount),
+                      PlayerClipNames[i] + ": 루프 설정이 맞다");
                 Check(settings[c].lockRootRotation && settings[c].lockRootHeightY && settings[c].lockRootPositionXZ,
                       PlayerClipNames[i] + ": 루트 모션이 꺼져 있다");
             }
 
             var clip = LoadPlayerClip(PlayerClipNames[i]);
             Check(clip && clip.humanMotion, PlayerClipNames[i] + ": 휴머노이드 클립이 있다");
-            Check(state.motion == clip, PlayerClipNames[i] + ": 해당 상태에 클립이 연결됐다");
+            if (i < PlayerLocomotionClipCount)
+            {
+                bool connected = false;
+                var children = locomotion.children;
+                for (int c = 0; c < children.Length; c++)
+                    connected |= children[c].motion == clip
+                                 && Vector2.Distance(children[c].position, PlayerLocomotionPositions[i]) < 0.001f;
+                Check(connected, PlayerClipNames[i] + ": 지정 좌표에 클립이 연결됐다");
+            }
+            else
+                Check(FindState(states, PlayerClipNames[i]).motion == clip,
+                      PlayerClipNames[i] + ": 해당 상태에 클립이 연결됐다");
         }
         if (missing.Count > 0) Debug.LogWarning("[V0.1] 없는 클립: " + string.Join(", ", missing));
 
@@ -3546,23 +3573,64 @@ public static class V01SceneBuilder
             if (body) break;
         }
         Check(body, "씬 플레이어에 CharacterController가 있다");
-        Check(Mathf.Abs(body.height - PlayerHeight) < 0.001f, "플레이어 콜라이더 높이가 1.6m다");
+        Check(Mathf.Abs(body.height - PlayerHeight) < 0.001f, "플레이어 콜라이더 높이가 1.2m다");
         Check(!body.GetComponent<MeshRenderer>(), "플레이어에 캡슐 MeshRenderer가 없다");
         Check(!body.transform.Find("Face"), "플레이어에 CapsuleFace가 없다");
 
         var visual = body.transform.Find("Model");
         Check(visual, "character01이 플레이어 자식으로 붙었다");
-        Check(Mathf.Abs(MeasureModelHeight(AssetDatabase.LoadAssetAtPath<GameObject>(PlayerModelPath))
-                        * visual.localScale.y - PlayerHeight) <= 0.02f,
-              "character01 몸 높이가 1.6m ± 0.02m다");
-        Check(Mathf.Abs(visual.localPosition.y + PlayerHeight * 0.5f) < 0.001f,
-              "character01 발이 콜라이더 밑면에 맞았다");
+        var visibleBounds = MeasureVisibleBounds(visual.gameObject);
+        Check(Mathf.Abs(visibleBounds.size.y - PlayerHeight) <= 0.03f,
+              "character01 보이는 키가 1.2m ± 0.03m다");
+        // 에디트 모드 구운 자세는 Humanoid 재배치 후의 재생 모드 발 위치를 대변하지 않는다.
+        Check(Mathf.Abs(visual.localPosition.y - (body.center.y - body.height / 2f)) <= 0.01f,
+              "character01 모델 원점이 콜라이더 밑면 ± 0.01m다");
+
+        var idleProbe = (GameObject)PrefabUtility.InstantiatePrefab(
+            AssetDatabase.LoadAssetAtPath<GameObject>(PlayerModelPath));
+        try
+        {
+            idleProbe.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            idleProbe.transform.localScale = visual.lossyScale;
+            var idleClip = LoadPlayerClip("Idle");
+            if (idleClip) idleClip.SampleAnimation(idleProbe, 0f);
+            var idleAnimator = idleProbe.GetComponentInChildren<Animator>();
+            var idleHead = idleAnimator ? idleAnimator.GetBoneTransform(HumanBodyBones.Head) : null;
+            var idleBounds = MeasureVisibleBounds(idleProbe);
+            float idleHeadHeight = idleHead ? idleHead.position.y - idleBounds.min.y : -1f;
+            Check(idleClip && idleHead && idleHeadHeight >= 0.8f && idleHeadHeight <= 1.15f,
+                  "Idle 자세 Head 뼈 높이가 발 기준 0.8~1.15m다");
+        }
+        finally
+        {
+            Object.DestroyImmediate(idleProbe);
+        }
 
         var animator = visual.GetComponentInChildren<Animator>();
         Check(animator && animator.runtimeAnimatorController == controller,
               "플레이어 Animator에 Player.controller가 연결됐다");
         Check(!animator.applyRootMotion, "플레이어 루트 모션이 꺼져 있다");
-        Check(body.GetComponent<PlayerAnimator>(), "PlayerAnimator가 붙었다");
+        var playerAnimator = body.GetComponent<PlayerAnimator>();
+        Check(playerAnimator, "PlayerAnimator가 붙었다");
+        var lookAtRelay = animator.GetComponent<PlayerLookAtRelay>();
+        Check(lookAtRelay && lookAtRelay.Target == playerAnimator,
+              "Model의 고개 IK 중계가 PlayerAnimator를 참조한다");
+        Check(controller.layers[0].iKPass, "플레이어 컨트롤러 IK Pass가 켜져 있다");
+        Check(locomotionState.iKOnFeet, "Locomotion Foot IK가 켜져 있다");
+
+        float[] inputYaws = { 0f, 45f, 90f, 135f, 180f, -135f, -179f, 179f };
+        float[] expectedTwists = { 0f, 45f, 45f, 22.5f, 0f, -22.5f, -0.5f, 0.5f };
+        for (int i = 0; i < inputYaws.Length; i++)
+        {
+            Vector3 move = Quaternion.AngleAxis(inputYaws[i], Vector3.up) * Vector3.forward;
+            Vector3 resolved = PlayerMotor.ResolveBodyDirection(move, Vector3.forward);
+            float twist = Vector3.SignedAngle(Vector3.forward, resolved, Vector3.up);
+            Check(Mathf.Abs(Mathf.DeltaAngle(twist, expectedTwists[i])) < 0.01f,
+                  "몸 방향 yaw " + inputYaws[i] + "도의 틂값이 " + expectedTwists[i] + "도다");
+        }
+        Check(Vector3.Angle(PlayerMotor.ResolveBodyDirection(Vector3.zero, Vector3.right),
+                          Vector3.right) < 0.01f,
+              "정지 중에는 몸이 조준 방향을 본다");
 
         var hairSprings = visual.GetComponentsInChildren<HairSpring>(true);
         Check(hairSprings.Length == 1, "플레이어 모델에 HairSpring이 1개다");
@@ -3797,6 +3865,8 @@ public static class V01SceneBuilder
         Check((Vision.BlockerMask & 1) != 0, "기본 레이어(벽)는 시야를 막는다");
         Check(BodyY + Vision.EyeOffset > WindowSillTop && BodyY + Vision.EyeOffset < WindowTop,
               "눈높이가 창턱과 인방 사이에 있다 (열린 창 너머가 보이려면)");
+        Check(Mathf.Abs(BodyY + Vision.PlayerEyeOffset - 1.15f) <= 0.05f,
+              "눈높이가 지면 기준 1.15m ± 0.05m다");
         Check(BodyY + Vision.EyeOffset < CounterHeight + 0.5f || CounterHeight < BodyY + Vision.EyeOffset,
               "반높이 카운터는 눈높이보다 낮다 (시야를 막으면 안 된다)");
 
@@ -3852,9 +3922,12 @@ public static class V01SceneBuilder
             fieldProbe.transform.position = new Vector3(540f, BodyY, 0f);
             fieldProbe.transform.rotation = Quaternion.LookRotation(Vector3.forward);
             var field = fieldProbe.AddComponent<VisionField>();
+            var fieldAim = fieldProbe.AddComponent<PlayerAim>();
             field.Refresh();
 
-            Check(field.Facing == Vector3.forward, "정면 방향이 캐릭터 forward 를 따른다");
+            Check(field.Facing == fieldAim.AimDirection, "정면 방향이 마우스 조준 방향을 따른다");
+            Check(Mathf.Abs(field.Origin.y - 1.15f) <= 0.05f,
+                  "VisionField 눈높이가 지면 기준 1.15m ± 0.05m다");
 
             float front = FarthestVisible(field, Vector3.forward);
             float insideCone = FarthestVisible(field, Quaternion.Euler(0f, 55f, 0f) * Vector3.forward);
@@ -3868,10 +3941,11 @@ public static class V01SceneBuilder
             Check(back < 1.5f, "등 뒤는 안 보인다 (사용자 요구)");
             Check(field.Visibility(field.Origin + Vector3.back * 0.5f) > 0.9f, "발밑은 뒤쪽도 보인다");
 
-            fieldProbe.transform.rotation = Quaternion.LookRotation(Vector3.right);
+            typeof(PlayerAim).GetProperty("AimDirection").GetSetMethod(true)
+                             .Invoke(fieldAim, new object[] { Vector3.right });
             field.Refresh();
-            Check(FarthestVisible(field, Vector3.right) > field.Range * 0.7f, "몸을 돌리면 부채꼴도 같이 돈다");
-            Check(FarthestVisible(field, Vector3.forward) < 1.5f, "돌린 뒤 원래 정면은 부채꼴 밖이 된다");
+            Check(FarthestVisible(field, Vector3.right) > field.Range * 0.7f, "조준을 돌리면 부채꼴도 같이 돈다");
+            Check(FarthestVisible(field, Vector3.forward) < 1.5f, "조준을 돌린 뒤 원래 정면은 부채꼴 밖이 된다");
 
             // ---- 마스크 일괄 채우기가 낱개 조회와 같은가 ----
             // 흐리기를 끄면 두 경로가 바이트 단위로 같아야 한다. 칸 표가 어긋나면 화면만 조용히 틀어진다.
@@ -3910,7 +3984,8 @@ public static class V01SceneBuilder
                 cornerWall.transform.SetParent(root.transform);
                 cornerWall.transform.position = new Vector3(540f, 1.5f, 6f);
                 cornerWall.transform.localScale = new Vector3(4f, 3f, 0.4f);
-                fieldProbe.transform.rotation = Quaternion.LookRotation(Vector3.forward);
+                typeof(PlayerAim).GetProperty("AimDirection").GetSetMethod(true)
+                                 .Invoke(fieldAim, new object[] { Vector3.forward });
                 Physics.SyncTransforms();
                 field.Refresh();
 
@@ -4840,8 +4915,19 @@ public static class V01SceneBuilder
     const string PlayerTextureFolder = PlayerCharacterFolder + "/Textures";
     const string PlayerMaterialFolder = PlayerCharacterFolder + "/Materials";
     const string PlayerControllerPath = AnimationFolder + "/Player.controller";
-    const float PlayerHeight = 1.6f;
-    static readonly string[] PlayerClipNames = { "Idle", "Walk", "Run", "Attack", "AttackOneHand", "Death" };
+    const float PlayerHeight = 1.2f;
+    const int PlayerLocomotionClipCount = 9;
+    static readonly string[] PlayerClipNames =
+    {
+        "Idle", "Walk", "Run", "WalkBack", "WalkLeft", "WalkRight",
+        "RunBack", "RunLeft", "RunRight", "Attack", "AttackOneHand", "Death"
+    };
+    static readonly Vector2[] PlayerLocomotionPositions =
+    {
+        Vector2.zero, new(0f, 1f), new(0f, 1.86f),
+        new(0f, -1f), new(-1f, 0f), new(1f, 0f),
+        new(0f, -1.86f), new(-1.86f, 0f), new(1.86f, 0f)
+    };
     static readonly string[] PlayerHairRootNames =
     {
         "Hair_Ahoge_01", "Hair_Back_C_01", "Hair_Back_L_01", "Hair_Back_R_01",
@@ -4925,7 +5011,7 @@ public static class V01SceneBuilder
             }
             for (int c = 0; c < clips.Length; c++)
             {
-                bool loop = i < 3;
+                bool loop = i < PlayerLocomotionClipCount;
                 clipChanged |= clips[c].loopTime != loop || !clips[c].lockRootRotation
                                || !clips[c].lockRootHeightY || !clips[c].lockRootPositionXZ;
                 clips[c].loopTime = loop;
@@ -4943,7 +5029,7 @@ public static class V01SceneBuilder
 
         var model = AssetDatabase.LoadAssetAtPath<GameObject>(PlayerModelPath);
         if (!model) throw new System.InvalidOperationException("character01 모델을 불러오지 못했습니다.");
-        if (MeasureModelHeight(model) <= 0.01f)
+        if (MeasurePlayerModelHeight(model) <= 0.01f)
             throw new System.InvalidOperationException("character01 모델 높이를 측정하지 못했습니다.");
 
         EnsurePlayerMaterials(model);
@@ -5090,9 +5176,6 @@ public static class V01SceneBuilder
     static UnityEditor.Animations.AnimatorController EnsurePlayerController()
     {
         Directory.CreateDirectory(AnimationFolder);
-        var idle = LoadPlayerClip("Idle");
-        var walk = LoadPlayerClip("Walk");
-        var run = LoadPlayerClip("Run");
         var attack = LoadPlayerClip("Attack");
         var attackOneHand = LoadPlayerClip("AttackOneHand");
         var death = LoadPlayerClip("Death");
@@ -5101,46 +5184,44 @@ public static class V01SceneBuilder
         if (!controller)
             controller = UnityEditor.Animations.AnimatorController.CreateAnimatorControllerAtPath(PlayerControllerPath);
         for (int i = controller.parameters.Length - 1; i >= 0; i--) controller.RemoveParameter(i);
-        controller.AddParameter("Speed", AnimatorControllerParameterType.Float);
+        controller.AddParameter("MoveX", AnimatorControllerParameterType.Float);
+        controller.AddParameter("MoveZ", AnimatorControllerParameterType.Float);
         controller.AddParameter("Attack", AnimatorControllerParameterType.Trigger);
         controller.AddParameter("AttackOneHand", AnimatorControllerParameterType.Trigger);
         controller.AddParameter("Dead", AnimatorControllerParameterType.Bool);
 
         var machine = controller.layers[0].stateMachine;
+        var layers = controller.layers;
+        layers[0].iKPass = true;
+        controller.layers = layers;
         var oldAnyTransitions = machine.anyStateTransitions;
         for (int i = 0; i < oldAnyTransitions.Length; i++) machine.RemoveAnyStateTransition(oldAnyTransitions[i]);
         var oldStates = machine.states;
         for (int i = 0; i < oldStates.Length; i++) machine.RemoveState(oldStates[i].state);
-        var idleState = machine.AddState("Idle");
-        idleState.motion = idle;
-        var walkState = machine.AddState("Walk");
-        walkState.motion = walk;
-        var runState = machine.AddState("Run");
-        runState.motion = run;
+        var assets = AssetDatabase.LoadAllAssetsAtPath(PlayerControllerPath);
+        for (int i = 0; i < assets.Length; i++)
+            if (assets[i] is UnityEditor.Animations.BlendTree) Object.DestroyImmediate(assets[i], true);
+        var locomotion = new UnityEditor.Animations.BlendTree
+        {
+            name = "Locomotion",
+            blendType = UnityEditor.Animations.BlendTreeType.FreeformDirectional2D,
+            blendParameter = "MoveX",
+            blendParameterY = "MoveZ",
+            useAutomaticThresholds = false
+        };
+        AssetDatabase.AddObjectToAsset(locomotion, controller);
+        for (int i = 0; i < PlayerLocomotionClipCount; i++)
+            locomotion.AddChild(LoadPlayerClip(PlayerClipNames[i]), PlayerLocomotionPositions[i]);
+        var locomotionState = machine.AddState("Locomotion");
+        locomotionState.motion = locomotion;
+        locomotionState.iKOnFeet = true;
         var attackState = machine.AddState("Attack");
         attackState.motion = attack;
         var attackOneHandState = machine.AddState("AttackOneHand");
         attackOneHandState.motion = attackOneHand;
         var deathState = machine.AddState("Death");
         deathState.motion = death;
-        machine.defaultState = idleState;
-
-        var idleToWalk = idleState.AddTransition(walkState);
-        idleToWalk.hasExitTime = false;
-        idleToWalk.duration = 0.15f;
-        idleToWalk.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Greater, 0.1f, "Speed");
-        var walkToIdle = walkState.AddTransition(idleState);
-        walkToIdle.hasExitTime = false;
-        walkToIdle.duration = 0.15f;
-        walkToIdle.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Less, 0.1f, "Speed");
-        var walkToRun = walkState.AddTransition(runState);
-        walkToRun.hasExitTime = false;
-        walkToRun.duration = 0.15f;
-        walkToRun.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Greater, 1.4f, "Speed");
-        var runToWalk = runState.AddTransition(walkState);
-        runToWalk.hasExitTime = false;
-        runToWalk.duration = 0.15f;
-        runToWalk.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Less, 1.4f, "Speed");
+        machine.defaultState = locomotionState;
 
         var attackStates = new[] { attackState, attackOneHandState };
         for (int i = 0; i < attackStates.Length; i++)
@@ -5153,22 +5234,10 @@ public static class V01SceneBuilder
             toAttack.AddCondition(UnityEditor.Animations.AnimatorConditionMode.If, 0f, attackStates[i].name);
             toAttack.AddCondition(UnityEditor.Animations.AnimatorConditionMode.IfNot, 0f, "Dead");
 
-            var attackToRun = attackStates[i].AddTransition(runState);
-            attackToRun.hasExitTime = attackClip;
-            attackToRun.exitTime = 0.85f;
-            attackToRun.duration = 0.12f;
-            attackToRun.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Greater, 1.4f, "Speed");
-            var attackToWalk = attackStates[i].AddTransition(walkState);
-            attackToWalk.hasExitTime = attackClip;
-            attackToWalk.exitTime = 0.85f;
-            attackToWalk.duration = 0.12f;
-            attackToWalk.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Greater, 0.1f, "Speed");
-            attackToWalk.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Less, 1.4f, "Speed");
-            var attackToIdle = attackStates[i].AddTransition(idleState);
-            attackToIdle.hasExitTime = attackClip;
-            attackToIdle.exitTime = 0.85f;
-            attackToIdle.duration = 0.12f;
-            attackToIdle.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Less, 0.1f, "Speed");
+            var attackDone = attackStates[i].AddTransition(locomotionState);
+            attackDone.hasExitTime = attackClip;
+            attackDone.exitTime = 0.85f;
+            attackDone.duration = 0.12f;
         }
 
         var toDeath = machine.AddAnyStateTransition(deathState);
@@ -5176,7 +5245,7 @@ public static class V01SceneBuilder
         toDeath.duration = 0.08f;
         toDeath.canTransitionToSelf = false;
         toDeath.AddCondition(UnityEditor.Animations.AnimatorConditionMode.If, 0f, "Dead");
-        var revive = deathState.AddTransition(idleState);
+        var revive = deathState.AddTransition(locomotionState);
         revive.hasExitTime = false;
         revive.duration = 0.08f;
         revive.AddCondition(UnityEditor.Animations.AnimatorConditionMode.IfNot, 0f, "Dead");
@@ -5325,7 +5394,54 @@ public static class V01SceneBuilder
                   + (types.Length > 0 && types[0] ? types[0].modelScale.ToString("F2") : "-"));
     }
 
-    /// <summary>발밑(y=0) 부터 렌더러 상단까지. 스킨드 메쉬는 인스턴스화해서 월드 바운즈로 재야 정확하다.</summary>
+    /// <summary>character01은 SkinnedMeshRenderer 바운즈가 FBX 단위를 잘못 반영하므로 보이는 정점을 굽는다.</summary>
+    static float MeasurePlayerModelHeight(GameObject model)
+    {
+        var probe = (GameObject)PrefabUtility.InstantiatePrefab(model);
+        try
+        {
+            probe.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            probe.transform.localScale = Vector3.one;
+            return MeasureVisibleBounds(probe).size.y;
+        }
+        finally
+        {
+            Object.DestroyImmediate(probe);
+        }
+    }
+
+    static Bounds MeasureVisibleBounds(GameObject root)
+    {
+        var min = new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+        var max = new Vector3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
+        var renderers = root.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            var mesh = new Mesh();
+            try
+            {
+                renderers[i].BakeMesh(mesh, true);
+                Matrix4x4 localToWorld = renderers[i].transform.localToWorldMatrix;
+                var vertices = mesh.vertices;
+                for (int v = 0; v < vertices.Length; v++)
+                {
+                    Vector3 world = localToWorld.MultiplyPoint3x4(vertices[v]);
+                    min = Vector3.Min(min, world);
+                    max = Vector3.Max(max, world);
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(mesh);
+            }
+        }
+        if (float.IsInfinity(min.x)) return default;
+        var bounds = new Bounds();
+        bounds.SetMinMax(min, max);
+        return bounds;
+    }
+
+    /// <summary>좀비 기존 측정 경로. zombi1 실측 0.999m를 유지한다.</summary>
     static float MeasureModelHeight(GameObject model)
     {
         var probe = (GameObject)PrefabUtility.InstantiatePrefab(model);

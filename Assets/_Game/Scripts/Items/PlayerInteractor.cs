@@ -29,6 +29,7 @@ public class PlayerInteractor : MonoBehaviour
     PlayerQuickSlots quickSlots;
     PlayerAssassinate assassinate;
     PlayerEquipment equipment;
+    PlayerAim aim;
     SurveyHighlight survey;
     [Tooltip("GDD 8항: 2개 이상 던질 때 띄우는 수량 선택창")]
     [SerializeField] QuantityDialog quantityDialog;
@@ -58,6 +59,7 @@ public class PlayerInteractor : MonoBehaviour
         quickSlots = GetComponent<PlayerQuickSlots>();
         assassinate = GetComponent<PlayerAssassinate>();
         equipment = GetComponent<PlayerEquipment>();
+        aim = GetComponent<PlayerAim>();
 
         // GDD 4항 F 주변 조사. 사용자 요구로 키 할당은 빼두고 컴포넌트만 남겨뒀다 —
         // 강조 방식을 정한 뒤 다시 붙인다. 호출하려면 survey.Survey() 를 쓰면 된다.
@@ -374,10 +376,11 @@ public class PlayerInteractor : MonoBehaviour
 
         // 바닥에 내려놓는 게 아니라 실제로 던진다. 예전에는 전방 지점을 아래로 레이캐스트해서 잡았는데,
         // 먼저 떨어진 아이템의 윗면에 맞아서 같은 자리에 탑이 쌓였다.
+        Vector3 direction = aim ? aim.AimDirection : transform.forward;
         Vector3 origin = transform.position
-                         + transform.forward * throwOriginForward
+                         + direction * throwOriginForward
                          + Vector3.up * throwOriginHeight;
-        Vector3 velocity = (transform.forward + Vector3.up * throwUpwardRatio).normalized * throwSpeed;
+        Vector3 velocity = (direction + Vector3.up * throwUpwardRatio).normalized * throwSpeed;
 
         WorldItem.Spawn(definition, quantity, origin, velocity).SetDurability(durability).SetAmmo(loadedAmmo);
     }

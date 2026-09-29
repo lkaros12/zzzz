@@ -13,12 +13,10 @@ using UnityEngine;
 public static class Vision
 {
     /// <summary>
-    /// 캐릭터 몸 위치에서 눈까지의 높이. 인자로 받는 위치는 발밑이 아니라
-    /// CharacterController 캡슐 중심(지면에서 1.05m)이다 — 이 프로젝트의 모든 캐릭터가 그렇다.
-    /// 그래서 눈은 지면 기준 약 1.35m 로, 창문 구멍(0.9~2.0m) 안에 들어온다.
-    /// 여기를 1.2 로 뒀다가 눈이 2.25m 가 돼서 열린 창문 너머가 안 보였다.
+    /// 좀비 CharacterController 중심에서 눈까지의 높이.
     /// </summary>
     public const float EyeOffset = 0.3f;
+    public const float PlayerEyeOffset = 0.5f;
 
     static int blockerMask;
 
@@ -48,9 +46,13 @@ public static class Vision
 
     /// <summary>두 눈 사이가 뚫려 있는지. 인자는 캡슐 중심 위치다.</summary>
     public static bool CanSee(Vector3 fromBody, Vector3 toBody, float maxDistance)
+        => CanSee(fromBody, EyeOffset, toBody, EyeOffset, maxDistance);
+
+    public static bool CanSee(Vector3 fromBody, float fromEyeOffset,
+                              Vector3 toBody, float toEyeOffset, float maxDistance)
     {
-        Vector3 from = fromBody + Vector3.up * EyeOffset;
-        Vector3 to = toBody + Vector3.up * EyeOffset;
+        Vector3 from = fromBody + Vector3.up * fromEyeOffset;
+        Vector3 to = toBody + Vector3.up * toEyeOffset;
 
         Vector3 delta = to - from;
         float distance = delta.magnitude;

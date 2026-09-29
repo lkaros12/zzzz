@@ -60,6 +60,8 @@ public class PlayerCombat : MonoBehaviour
     /// <summary>실제로 공격을 시작한 마지막 시각. 애니메이션은 이 값을 읽기만 한다.</summary>
     public float LastAttackTime { get; private set; }
 
+    public bool IsAttacking => Time.time < nextAttackTime[0] || Time.time < nextAttackTime[1];
+
     /// <summary>UI 에 띄우는 마지막 결과 메시지 (파손 등).</summary>
     public string LastMessage { get; private set; } = string.Empty;
 
@@ -409,7 +411,7 @@ public class PlayerCombat : MonoBehaviour
 
             Vector3 toTarget = zombie.transform.position - transform.position;
             toTarget.y = 0f;
-            if (Vector3.Angle(transform.forward, toTarget) > halfAngle) continue;
+            if (Vector3.Angle(aim ? aim.AimDirection : transform.forward, toTarget) > halfAngle) continue;
 
             // 벽 너머는 못 때린다. 거리와 각도만 보면 벽을 통과해 맞는다 (히트스캔은 이미 본다).
             if (!HasLineOfSight(zombie)) continue;

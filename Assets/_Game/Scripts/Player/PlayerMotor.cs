@@ -59,6 +59,7 @@ public class PlayerMotor : MonoBehaviour
     PlayerShield shield;
     PlayerAssassinate assassinate;
     PlayerVault vault;
+    PlayerCombat combat;
 
     Vector3 dodgeDirection;
     float dodgeEndTime, invulnerableUntil, hitSlowUntil, verticalVelocity;
@@ -86,6 +87,7 @@ public class PlayerMotor : MonoBehaviour
         if (!GetComponent<AimCursorFx>()) gameObject.AddComponent<AimCursorFx>();
         assassinate = GetComponent<PlayerAssassinate>();
         if (!assassinate) assassinate = gameObject.AddComponent<PlayerAssassinate>();
+        combat = GetComponent<PlayerCombat>();
 
         // 기획 5항 창문 파쿠르. 씬 재빌드 없이 붙도록 런타임에 보강한다.
         vault = GetComponent<PlayerVault>();
@@ -122,12 +124,31 @@ public class PlayerMotor : MonoBehaviour
 
         cc.Move((horizontal + Vector3.up * verticalVelocity) * Time.deltaTime);
 
-        // 조준은 PlayerAim 이 마우스 방향으로 맞춘다. 조준이 없을 때만 이동 방향을 바라본다.
-        if (!aim && horizontal.sqrMagnitude > 0.01f)
+        if (!held)
         {
-            Quaternion look = Quaternion.LookRotation(new Vector3(horizontal.x, 0f, horizontal.z));
+            Vector3 bodyDirection = (shield && shield.IsBlocking) || (combat && combat.IsAttacking)
+                ? aim.AimDirection
+                : ResolveBodyDirection(horizontal, aim.AimDirection);
+            Quaternion look = Quaternion.LookRotation(bodyDirection);
             transform.rotation = Quaternion.RotateTowards(transform.rotation, look, turnSpeed * Time.deltaTime);
         }
+    }
+
+    /// <summary>조준을 기준으로 이동 방향 쪽으로 몸을 최대 45도만 튼다.</summary>
+    public static Vector3 ResolveBodyDirection(Vector3 moveDirection, Vector3 aimDirection)
+    {
+        moveDirection.y = 0f;
+        aimDirection.y = 0f;
+        if (aimDirection.sqrMagnitude < 0.0001f && moveDirection.sqrMagnitude < 0.0001f)
+            return Vector3.forward;
+        if (aimDirection.sqrMagnitude < 0.0001f) return moveDirection.normalized;
+        if (moveDirection.sqrMagnitude < 0.0001f) return aimDirection.normalized;
+        float yaw = Vector3.SignedAngle(aimDirection, moveDirection, Vector3.up);
+        float twist = Mathf.Abs(yaw) <= 90f
+            ? Mathf.Clamp(yaw, -45f, 45f)
+            : Mathf.Sign(yaw) * 45f * (180f - Mathf.Abs(yaw)) / 90f;
+        return Quaternion.AngleAxis(twist, Vector3.up)
+                         * aimDirection.normalized;
     }
 
     Vector3 WalkVelocity(Vector3 input)

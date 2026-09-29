@@ -10,8 +10,6 @@ using UnityEngine.InputSystem;
 public class PlayerAim : MonoBehaviour
 {
     [SerializeField] Camera aimCamera;
-    [Tooltip("0 이면 즉시 회전. 값을 주면 초당 각도로 따라간다")]
-    [SerializeField] float turnSpeed = 0f;
     [Tooltip("커서 레이가 닿는 최대 거리. 총 사거리보다 넉넉하게 둔다")]
     [SerializeField] float maxAimDistance = 200f;
 
@@ -64,7 +62,6 @@ public class PlayerAim : MonoBehaviour
         if (flat.sqrMagnitude < 0.01f) return;
 
         AimDirection = flat.normalized;
-        FaceAim();
     }
 
     /// <summary>
@@ -113,11 +110,4 @@ public class PlayerAim : MonoBehaviour
         return false;
     }
 
-    void FaceAim()
-    {
-        var look = Quaternion.LookRotation(AimDirection);
-        transform.rotation = turnSpeed <= 0f
-            ? look
-            : Quaternion.RotateTowards(transform.rotation, look, turnSpeed * Time.deltaTime);
-    }
 }

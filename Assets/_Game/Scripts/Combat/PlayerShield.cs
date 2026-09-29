@@ -22,6 +22,7 @@ public class PlayerShield : MonoBehaviour
     PlayerStats stats;
     PlayerGrapple grapple;
     PlayerAssassinate assassinate;
+    PlayerAim aim;
 
     float readyAgainAt;
 
@@ -37,6 +38,7 @@ public class PlayerShield : MonoBehaviour
         stats = GetComponent<PlayerStats>();
         grapple = GetComponent<PlayerGrapple>();
         assassinate = GetComponent<PlayerAssassinate>();
+        aim = GetComponent<PlayerAim>();
     }
 
     /// <summary>보조무기 슬롯에 든 방패. 없으면 null.</summary>
@@ -100,7 +102,8 @@ public class PlayerShield : MonoBehaviour
         toAttacker.y = 0f;
 
         // GDD 21항: 정면 120° 범위만. 뒤에서 오는 공격은 방어할 수 없다.
-        if (Vector3.Angle(transform.forward, toAttacker) > blockAngle * 0.5f) return false;
+        Vector3 blockDirection = aim ? aim.AimDirection : transform.forward;
+        if (Vector3.Angle(blockDirection, toAttacker) > blockAngle * 0.5f) return false;
 
         IsBlocking = false;
         readyAgainAt = Time.time + impact;

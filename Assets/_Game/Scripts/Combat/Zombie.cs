@@ -774,7 +774,8 @@ public class Zombie : MonoBehaviour
     /// "내 눈에 안 보이는 좀비는 나도 못 본다" 가 성립한다.
     /// </summary>
     bool HasSightLine() =>
-        player && Vision.CanSee(transform.position, player.position, visionRange);
+        player && Vision.CanSee(transform.position, Vision.EyeOffset,
+                                player.position, Vision.PlayerEyeOffset, visionRange);
 
     /// <summary>
     /// 좀보이드식 무리 전파. 플레이어를 발견한 순간 신음을 내서 주변 좀비를 끌어온다.
@@ -1016,7 +1017,8 @@ public class Zombie : MonoBehaviour
     /// 거리와 각도만 보면 벽 너머 플레이어를 때린다 (플레이어 쪽 암살/근접도 같은 구멍이 있었다).
     /// </summary>
     bool CanStrikePlayer =>
-        player && Vision.CanSee(transform.position, player.position, attackRange + 0.5f);
+        player && Vision.CanSee(transform.position, Vision.EyeOffset,
+                                player.position, Vision.PlayerEyeOffset, attackRange + 0.5f);
 
     /// <summary>플레이어와 높이 차가 납득할 범위인지. 바닥을 뚫고 빠진 좀비를 걸러낸다.</summary>
     bool IsReachableHeight =>

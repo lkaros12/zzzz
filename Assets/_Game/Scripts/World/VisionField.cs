@@ -46,6 +46,8 @@ public class VisionField : MonoBehaviour
     // Visibility 는 칸마다 각도 한 번만 구해 표를 읽는다 (칸이 수만 개라 여기서 삼각함수를 더 쓰면 비싸다).
     float[] wallDistance;   // 벽까지의 실제 거리
     float[] coneWeight;     // 부채꼴 안이면 1, 가장자리에서 0 으로
+    PlayerAim aim;
+    PlayerAssassinate assassinate;
 
     public float Range => range;
     /// <summary>눈 위치. 음영 텍스처의 중심이기도 하다.</summary>
@@ -55,6 +57,8 @@ public class VisionField : MonoBehaviour
 
     void Awake()
     {
+        aim = GetComponent<PlayerAim>();
+        assassinate = GetComponent<PlayerAssassinate>();
         Allocate();
         Sample();
     }
@@ -77,11 +81,14 @@ public class VisionField : MonoBehaviour
     void Sample()
     {
         Allocate();
+        if (!aim) aim = GetComponent<PlayerAim>();
 
-        Origin = transform.position + Vector3.up * Vision.EyeOffset;
+        Origin = transform.position + Vector3.up * (aim ? Vision.PlayerEyeOffset : Vision.EyeOffset);
 
-        // 캐릭터가 바라보는 방향. PlayerAim 이 마우스 쪽으로 몸을 돌리므로 WASD 와는 무관하다.
-        Vector3 facing = transform.forward;
+        // 몸은 이동을 따라가도 시야는 마우스 조준을 따라가야 한다.
+        Vector3 facing = assassinate && assassinate.IsAssassinating
+            ? transform.forward
+            : aim ? aim.AimDirection : transform.forward;
         facing.y = 0f;
         Facing = facing.sqrMagnitude > 0.0001f ? facing.normalized : Vector3.forward;
 

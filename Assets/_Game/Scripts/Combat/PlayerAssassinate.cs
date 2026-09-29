@@ -112,7 +112,8 @@ public class PlayerAssassinate : MonoBehaviour
     /// 검사에서 부르려고 공개해 두었다 — 거리/각도만 보던 예전 판정은 벽 너머 좀비를 집었다.
     /// </summary>
     public bool HasClearPath(Vector3 targetPosition) =>
-        Vision.CanSee(transform.position, targetPosition, range + 0.5f);
+        Vision.CanSee(transform.position, Vision.PlayerEyeOffset,
+                      targetPosition, Vision.EyeOffset, range + 0.5f);
 
     /// <summary>E 입력이 들어왔을 때. 조건이 맞으면 즉시 시작한다 (GDD 19항: 준비시간 없음).</summary>
     public bool TryStart()

@@ -420,12 +420,12 @@ public class SaveSystem : MonoBehaviour
         {
             var entry = data.zombies[i];
 
-            // Spawn 이 1.05 만큼 띄우므로 저장된 위치에서 그만큼 내려서 넣는다.
-            var groundPosition = entry.position - Vector3.up * 1.05f;
-            var zombie = Zombie.Spawn(groundPosition,
+            var zombie = Zombie.Spawn(entry.position,
                 FindZombieType(entry.typeId),
                 entry.isPlayerCorpse ? corpseMaterial : zombieMaterial,
                 entry.isPlayerCorpse);
+            var cc = zombie.GetComponent<CharacterController>();
+            zombie.transform.position -= Vector3.up * (cc.height * 0.5f - 0.05f);
 
             zombie.transform.rotation = Quaternion.Euler(0f, entry.yaw, 0f);
             zombie.LoadHealth(entry.health);

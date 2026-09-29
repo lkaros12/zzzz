@@ -111,6 +111,6 @@ public class PlayerDeath : MonoBehaviour
 
         // 스폰 지점이 없으면 원점 주변으로.
         var offset = Random.insideUnitCircle * 6f;
-        return new Vector3(offset.x, 1.05f, offset.y);
+        return new Vector3(offset.x, cc ? cc.height * 0.5f + 0.05f : 0.65f, offset.y);
     }
 }

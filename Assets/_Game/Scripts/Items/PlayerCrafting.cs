@@ -64,7 +64,7 @@ public class PlayerCrafting : MonoBehaviour
         if (!inventory.PlaceExact(crafted) && !inventory.TryPlaceStack(crafted))
         {
             // 자리가 없으면 발밑에 떨어뜨린다 — 결과물을 소멸시키는 쪽이 최악이다.
-            WorldItem.Spawn(recipe.result, 1, transform.position + Vector3.up * 0.8f, Vector3.zero)
+            WorldItem.Spawn(recipe.result, 1, transform.position + Vector3.up * 0.6f, Vector3.zero)
                      .SetDurability(crafted.durability);
         }
 
