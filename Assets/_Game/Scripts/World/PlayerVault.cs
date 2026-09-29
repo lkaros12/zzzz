@@ -34,7 +34,7 @@ public class PlayerVault : MonoBehaviour
 
         LastWindow = window;
         from = transform.position;
-        to = window.VaultTarget(from);
+        to = window.VaultTarget(from, cc.height * 0.5f);
         startTime = Time.time;
 
         // 넘는 동안은 이 창이 닫히지 않게 잠근다. 안 잠그면 공중에서 E 로 닫아

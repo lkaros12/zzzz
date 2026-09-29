@@ -37,6 +37,8 @@ public class PlayerMotor : MonoBehaviour
 
     [SerializeField] float gravity = -20f;
 
+    public float RunSpeed => runSpeed;
+
     [Header("소음 (GDD 18항)")]
     [Tooltip("걷기 소음. 기획서 예시(식칼 5) 보다 작게 둬서 발소리만으로는 멀리 안 퍼지게 한다")]
     [SerializeField] float walkNoise = 4f;

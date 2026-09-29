@@ -114,11 +114,13 @@ public class PlayerEquipment : MonoBehaviour
         if (definition.isShield) return slot == EquipmentSlot.OffHand;
 
         // 한손 근접 무기만 양손 슬롯 겸용.
-        bool oneHandedMelee = definition.handedness == WeaponHandedness.OneHanded && !definition.ranged;
-        if (oneHandedMelee) return true;
+        if (IsOneHandedMelee(definition)) return true;
 
         return definition.equipSlot == slot;
     }
+
+    public static bool IsOneHandedMelee(ItemDefinition definition) =>
+        definition && definition.handedness == WeaponHandedness.OneHanded && !definition.ranged;
 
     public bool Unequip(EquipmentSlot slot)
     {

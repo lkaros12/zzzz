@@ -57,6 +57,9 @@ public class PlayerCombat : MonoBehaviour
     /// <summary>UI/디버그용. 마지막 공격에 맞은 대상 수.</summary>
     public int LastAttackHitCount { get; private set; }
 
+    /// <summary>실제로 공격을 시작한 마지막 시각. 애니메이션은 이 값을 읽기만 한다.</summary>
+    public float LastAttackTime { get; private set; }
+
     /// <summary>UI 에 띄우는 마지막 결과 메시지 (파손 등).</summary>
     public string LastMessage { get; private set; } = string.Empty;
 
@@ -229,6 +232,7 @@ public class PlayerCombat : MonoBehaviour
         if (useWeapon && weaponStack.UsesAmmo) weaponStack.loadedAmmo--;
 
         nextAttackTime[handIndex] = Time.time + interval;
+        LastAttackTime = Time.time;
 
         float range = (useWeapon ? weapon.attackRange : unarmedRange) + rangePadding;
         float damage = useWeapon ? weapon.attackDamage : unarmedDamage;

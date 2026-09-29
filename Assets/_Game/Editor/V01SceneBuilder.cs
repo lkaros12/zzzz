@@ -340,32 +340,61 @@ public static class V01SceneBuilder
 
     internal static GameObject CreatePlayer()
     {
-        var player = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        var model = EnsurePlayerModelAndAnimation();
+        var controller = EnsurePlayerController();
+        var player = new GameObject("Player");
         player.name = "Player";
-        // CharacterController가 충돌을 담당하므로 프리미티브 콜라이더는 제거.
-        Object.DestroyImmediate(player.GetComponent<CapsuleCollider>());
         // 도입부: 주인공은 자기 방에서 시작한다.
         player.transform.position = Flat(2.2f, 8.2f) + Vector3.up * BodyY;
 
         var cc = player.AddComponent<CharacterController>();
         cc.center = Vector3.zero;
-        cc.height = 2f;
+        cc.height = PlayerHeight;
         // 지름 1m 는 실제 문(1.0m) 을 못 지난다. 사람 어깨폭에 가깝게 줄였다.
         cc.radius = 0.32f;
         cc.slopeLimit = 45f;
-        // 프리미티브 캡슐은 지름 1m 다. 콜라이더만 줄이면 몸이 실제보다 굵어 보여
-        // 방이 훨씬 좁아 보인다 (사용자가 지적). 보이는 크기를 콜라이더에 맞춘다.
-        player.transform.localScale = new Vector3(cc.radius * 2f, 1f, cc.radius * 2f);
         // NavMesh 가 올라갈 수 있다고 보는 높이와 맞춘다 (경로/물리 불일치 방지).
         cc.stepOffset = AgentClimb();
+
+        var visual = (GameObject)PrefabUtility.InstantiatePrefab(model, player.transform);
+        visual.name = "Model";
+        // character01 원점은 발밑이므로 콜라이더 아래끝까지 내린다.
+        visual.transform.localPosition = Vector3.down * (PlayerHeight * 0.5f);
+        visual.transform.localRotation = Quaternion.identity;
+        visual.transform.localScale = Vector3.one * (PlayerHeight / MeasureModelHeight(model));
+        ApplyPlayerMaterials(visual);
+
+        var animator = visual.GetComponentInChildren<Animator>();
+        if (!animator) throw new System.InvalidOperationException("character01에 Animator가 없습니다.");
+        animator.runtimeAnimatorController = controller;
+        animator.applyRootMotion = false;
+        animator.cullingMode = AnimatorCullingMode.CullUpdateTransforms;
+
+        var hair = visual.AddComponent<HairSpring>();
+        var serializedHair = new SerializedObject(hair);
+        var hairRoots = serializedHair.FindProperty("roots");
+        hairRoots.arraySize = PlayerHairRootNames.Length;
+        var modelTransforms = visual.GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < PlayerHairRootNames.Length; i++)
+        {
+            Transform root = null;
+            for (int t = 0; t < modelTransforms.Length; t++)
+                if (modelTransforms[t].name == PlayerHairRootNames[i]) { root = modelTransforms[t]; break; }
+            if (!root) throw new System.InvalidOperationException("character01 머리카락 본이 없습니다: " + PlayerHairRootNames[i]);
+            hairRoots.GetArrayElementAtIndex(i).objectReferenceValue = root;
+        }
+        serializedHair.ApplyModifiedPropertiesWithoutUndo();
 
         player.AddComponent<PlayerStats>();
         player.AddComponent<PlayerMotor>();
 
         // 플레이어도 마우스 방향으로 도니까 자기 몸이 어디를 보는지 보여야 한다.
-        CapsuleFace.Build(player.transform, player.GetComponent<Renderer>().sharedMaterial);
         int characterLayer = LayerMask.NameToLayer("Character");
-        if (characterLayer >= 0) player.layer = characterLayer; // 던진 아이템과 충돌하지 않게
+        if (characterLayer >= 0)
+        {
+            var all = player.GetComponentsInChildren<Transform>(true);
+            for (int i = 0; i < all.Length; i++) all[i].gameObject.layer = characterLayer;
+        }
 
         player.AddComponent<PlayerInventory>();
         player.AddComponent<PlayerEquipment>();
@@ -385,6 +414,7 @@ public static class V01SceneBuilder
 
         player.AddComponent<PlayerGrapple>();
         player.AddComponent<PlayerCombat>();
+        player.AddComponent<PlayerAnimator>();
         player.AddComponent<PlayerDeath>();
 
         // 테스트용 시작 상태. 실제 시작 상태가 정해지면 이 줄과 DebugStartState.cs 를 지운다.
@@ -626,9 +656,9 @@ public static class V01SceneBuilder
         Vector3[] spots =
         {
             Flat(2.2f, 8.2f) + Vector3.up * BodyY,
-            new Vector3(10f, 1.05f, -10f),
-            new Vector3(38f, 1.05f, -10f),
-            new Vector3(-2f, 1.05f, -10f),
+            new Vector3(10f, BodyY, -10f),
+            new Vector3(38f, BodyY, -10f),
+            new Vector3(-2f, BodyY, -10f),
         };
 
         var points = new Transform[spots.Length];
@@ -1862,6 +1892,7 @@ public static class V01SceneBuilder
             CheckAmmoCraftingAndContainers();
             CheckInstanceStateChain();
             CheckWorldAndVision();
+            CheckPlayerModelAndAnimation();
             CheckZombieModelAndAnimation();
 
             Debug.Log("[V0.1] Self check PASSED");
@@ -3444,6 +3475,155 @@ public static class V01SceneBuilder
     //          ├─────────────┤    │   주방     │
     //   z=0    └── 식당 ──────┴[현관]──────────┘
     //
+    static void CheckPlayerModelAndAnimation()
+    {
+        var modelImporter = AssetImporter.GetAtPath(PlayerModelPath) as ModelImporter;
+        Check(modelImporter, "character01 모델 FBX가 있다");
+        Check(modelImporter.animationType == ModelImporterAnimationType.Human,
+              "character01 리그가 Humanoid다");
+
+        var avatar = AssetDatabase.LoadAssetAtPath<Avatar>(PlayerModelPath);
+        Check(avatar && avatar.isValid && avatar.isHuman, "character01 아바타가 유효한 Human이다");
+        Check(string.IsNullOrEmpty(HumanBoneName(avatar.humanDescription, "LeftEye")), "character01 LeftEye가 머리카락 본에 매핑되지 않았다");
+        Check(string.IsNullOrEmpty(HumanBoneName(avatar.humanDescription, "RightEye")), "character01 RightEye가 머리카락 본에 매핑되지 않았다");
+        Check(string.IsNullOrEmpty(HumanBoneName(avatar.humanDescription, "Jaw")), "character01 Jaw가 머리카락 본에 매핑되지 않았다");
+        Check(AssetDatabase.FindAssets("t:Texture2D", new[] { PlayerTextureFolder }).Length > 0,
+              "character01 내장 텍스처가 Textures 폴더에 추출됐다");
+
+        var controller = AssetDatabase.LoadAssetAtPath<UnityEditor.Animations.AnimatorController>(PlayerControllerPath);
+        Check(controller, "Player.controller가 있다");
+        Check(controller.parameters.Length == 4, "Player.controller 파라미터가 4개다");
+        Check(HasParameter(controller, "Speed", AnimatorControllerParameterType.Float), "플레이어 Speed 파라미터");
+        Check(HasParameter(controller, "Attack", AnimatorControllerParameterType.Trigger), "플레이어 Attack 파라미터");
+        Check(HasParameter(controller, "AttackOneHand", AnimatorControllerParameterType.Trigger), "플레이어 AttackOneHand 파라미터");
+        Check(HasParameter(controller, "Dead", AnimatorControllerParameterType.Bool), "플레이어 Dead 파라미터");
+
+        var states = controller.layers[0].stateMachine.states;
+        Check(states.Length == 6, "플레이어 상태가 6개다");
+        for (int i = 0; i < PlayerClipNames.Length; i++)
+            Check(FindState(states, PlayerClipNames[i]) != null, PlayerClipNames[i] + " 상태가 있다");
+
+        var missing = new System.Collections.Generic.List<string>();
+        for (int i = 0; i < PlayerClipNames.Length; i++)
+        {
+            string path = PlayerCharacterFolder + "/character01@" + PlayerClipNames[i] + ".fbx";
+            var importer = AssetImporter.GetAtPath(path) as ModelImporter;
+            var state = FindState(states, PlayerClipNames[i]);
+            if (!importer)
+            {
+                missing.Add(PlayerClipNames[i]);
+                Check(state.motion == null, PlayerClipNames[i] + " 클립이 없어 상태 모션이 비어 있다");
+                continue;
+            }
+
+            Check(importer.animationType == ModelImporterAnimationType.Human,
+                  PlayerClipNames[i] + ": 리그가 Humanoid다");
+            Check(importer.avatarSetup == ModelImporterAvatarSetup.CreateFromThisModel,
+                  PlayerClipNames[i] + ": 자체 아바타를 만든다");
+            Check(!importer.sourceAvatar, PlayerClipNames[i] + ": 원본 아바타가 없다");
+            Check(importer.importedTakeInfos.Length > 0, PlayerClipNames[i] + ": 클립이 1개 이상이다");
+
+            var settings = importer.clipAnimations;
+            if (settings.Length == 0) settings = importer.defaultClipAnimations;
+            Check(settings.Length > 0, PlayerClipNames[i] + ": 클립 설정이 있다");
+            for (int c = 0; c < settings.Length; c++)
+            {
+                Check(settings[c].loopTime == (i < 3), PlayerClipNames[i] + ": 루프 설정이 맞다");
+                Check(settings[c].lockRootRotation && settings[c].lockRootHeightY && settings[c].lockRootPositionXZ,
+                      PlayerClipNames[i] + ": 루트 모션이 꺼져 있다");
+            }
+
+            var clip = LoadPlayerClip(PlayerClipNames[i]);
+            Check(clip && clip.humanMotion, PlayerClipNames[i] + ": 휴머노이드 클립이 있다");
+            Check(state.motion == clip, PlayerClipNames[i] + ": 해당 상태에 클립이 연결됐다");
+        }
+        if (missing.Count > 0) Debug.LogWarning("[V0.1] 없는 클립: " + string.Join(", ", missing));
+
+        CharacterController body = null;
+        foreach (var candidate in Object.FindObjectsByType<PlayerStats>(FindObjectsSortMode.None))
+        {
+            body = candidate.GetComponent<CharacterController>();
+            if (body) break;
+        }
+        Check(body, "씬 플레이어에 CharacterController가 있다");
+        Check(Mathf.Abs(body.height - PlayerHeight) < 0.001f, "플레이어 콜라이더 높이가 1.6m다");
+        Check(!body.GetComponent<MeshRenderer>(), "플레이어에 캡슐 MeshRenderer가 없다");
+        Check(!body.transform.Find("Face"), "플레이어에 CapsuleFace가 없다");
+
+        var visual = body.transform.Find("Model");
+        Check(visual, "character01이 플레이어 자식으로 붙었다");
+        Check(Mathf.Abs(MeasureModelHeight(AssetDatabase.LoadAssetAtPath<GameObject>(PlayerModelPath))
+                        * visual.localScale.y - PlayerHeight) <= 0.02f,
+              "character01 몸 높이가 1.6m ± 0.02m다");
+        Check(Mathf.Abs(visual.localPosition.y + PlayerHeight * 0.5f) < 0.001f,
+              "character01 발이 콜라이더 밑면에 맞았다");
+
+        var animator = visual.GetComponentInChildren<Animator>();
+        Check(animator && animator.runtimeAnimatorController == controller,
+              "플레이어 Animator에 Player.controller가 연결됐다");
+        Check(!animator.applyRootMotion, "플레이어 루트 모션이 꺼져 있다");
+        Check(body.GetComponent<PlayerAnimator>(), "PlayerAnimator가 붙었다");
+
+        var hairSprings = visual.GetComponentsInChildren<HairSpring>(true);
+        Check(hairSprings.Length == 1, "플레이어 모델에 HairSpring이 1개다");
+        var hair = hairSprings[0];
+        Check(hair.StrandCount == 7, "HairSpring 가닥이 7개다");
+        Check(hair.BoneCount == 19, "HairSpring 본 합계가 19개다");
+        Check(hair.MaxAngle <= 15f && Mathf.Approximately(hair.MaxAngle, 12f), "HairSpring maxAngle이 기본 12도이고 15도 이하다");
+
+        var hairBones = new System.Collections.Generic.List<Transform>();
+        var modelBones = visual.GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < modelBones.Length; i++)
+            if (modelBones[i].name.StartsWith("Hair_") && modelBones[i].name != "Hair_work") hairBones.Add(modelBones[i]);
+        Check(hairBones.Count == 19, "character01 머리카락 본을 19개 찾았다");
+
+        Vector3 originalPosition = visual.position;
+        hair.Simulate(1f / 60f);
+        var referenceRotations = new Quaternion[hairBones.Count];
+        var referenceWorldRotations = new Quaternion[hairBones.Count];
+        for (int i = 0; i < hairBones.Count; i++)
+        {
+            referenceRotations[i] = hairBones[i].localRotation;
+            referenceWorldRotations[i] = hairBones[i].rotation;
+        }
+        const float hairStep = 0.2f;
+        Check(!PlayerAnimator.IsTeleport(Vector3.right * hairStep, 1f / 60f, body.GetComponent<PlayerMotor>().RunSpeed),
+              "HairSpring 검사용 이동이 순간이동 한계보다 작다");
+        for (int i = 0; i < 8; i++)
+        {
+            visual.position += Vector3.right * hairStep;
+            hair.Simulate(1f / 60f);
+        }
+        float largestAngle = 0f;
+        float largestCumulativeAngle = 0f;
+        for (int i = 0; i < hairBones.Count; i++)
+        {
+            largestAngle = Mathf.Max(largestAngle, Quaternion.Angle(referenceRotations[i], hairBones[i].localRotation));
+            largestCumulativeAngle = Mathf.Max(largestCumulativeAngle,
+                Quaternion.Angle(referenceWorldRotations[i], hairBones[i].rotation));
+        }
+        visual.position = originalPosition;
+        for (int i = 0; i < hairBones.Count; i++) hairBones[i].localRotation = referenceRotations[i];
+        hair.Simulate(1f / 60f);
+        Check(largestAngle > 0.5f, "작은 연속 이동으로 머리카락 본이 기준에서 0.5도 넘게 움직인다");
+        Check(largestAngle <= hair.MaxAngle + 0.5f, "머리카락 마디 각도가 maxAngle + 0.5도 이하다");
+        Check(largestCumulativeAngle <= hair.MaxAngle + 0.5f, "머리카락 누적 각도가 maxAngle + 0.5도 이하다");
+
+        var shader = Shader.Find("Universal Render Pipeline/Lit");
+        var renderers = visual.GetComponentsInChildren<Renderer>(true);
+        Check(renderers.Length > 0, "character01에 렌더러가 있다");
+        for (int r = 0; r < renderers.Length; r++)
+        for (int m = 0; m < renderers[r].sharedMaterials.Length; m++)
+        {
+            var material = renderers[r].sharedMaterials[m];
+            if (!material) { Check(false, "character01 렌더러에 null 재질이 없다"); continue; }
+            Check(material && material.shader == shader, material.name + " 재질이 URP Lit다");
+            var texture = material.GetTexture("_BaseMap");
+            Check(texture && AssetDatabase.GetAssetPath(texture).StartsWith(PlayerTextureFolder + "/"),
+                  material.name + " 재질이 추출된 텍스처를 참조한다");
+        }
+    }
+
     /// <summary>
     /// 좀비 3D 모델 + 휴머노이드 애니메이션 체인.
     ///
@@ -3898,8 +4078,7 @@ public static class V01SceneBuilder
                   "문 높이가 머리+stepOffset 보다 높다 (머리 " + headroom.ToString("F2")
                   + "m + step " + body.stepOffset.ToString("F2") + "m < 문 " + DoorHeight + "m)");
             Check(body.stepOffset > 0.25f, "stepOffset 이 계단 한 칸(0.25m) 보다 크다");
-            Check(Mathf.Abs(body.transform.localScale.x - body.radius * 2f) < 0.01f,
-                  "보이는 몸 굵기가 콜라이더와 같다");
+            Check(!body.GetComponent<MeshRenderer>(), "플레이어 루트에 캡슐 MeshRenderer가 없다");
         }
 
         var livingWindow = FindOpening(openings, "Window_Living_W");
@@ -4653,9 +4832,372 @@ public static class V01SceneBuilder
 
     public static float AgentRadius() => UnityEngine.AI.NavMesh.GetSettingsByID(0).agentRadius;
 
-    // ---- 좀비 3D 모델 + 애니메이션 ----
+    // ---- 플레이어 3D 모델 + 애니메이션 ----
     const string AnimationFolder = "Assets/_Game/Data/Animation";
     const string CharacterFolder = "Assets/_Game/Art/Characters";
+    const string PlayerCharacterFolder = CharacterFolder + "/Player";
+    const string PlayerModelPath = PlayerCharacterFolder + "/character01.fbx";
+    const string PlayerTextureFolder = PlayerCharacterFolder + "/Textures";
+    const string PlayerMaterialFolder = PlayerCharacterFolder + "/Materials";
+    const string PlayerControllerPath = AnimationFolder + "/Player.controller";
+    const float PlayerHeight = 1.6f;
+    static readonly string[] PlayerClipNames = { "Idle", "Walk", "Run", "Attack", "AttackOneHand", "Death" };
+    static readonly string[] PlayerHairRootNames =
+    {
+        "Hair_Ahoge_01", "Hair_Back_C_01", "Hair_Back_L_01", "Hair_Back_R_01",
+        "Hair_Bangs_C_01", "Hair_Side_L_01", "Hair_Side_R_01"
+    };
+    static readonly string[][] PlayerMaterialTextures =
+    {
+        new[] { "material_0.001", "Image_0_001.png", "Image_1_001.png" },
+        new[] { "material_0.002", "Image_0_003.png", "Image_1_003.png" }
+    };
+
+    static GameObject EnsurePlayerModelAndAnimation()
+    {
+        var importer = AssetImporter.GetAtPath(PlayerModelPath) as ModelImporter;
+        if (!importer) throw new System.IO.FileNotFoundException("character01 FBX가 없습니다.", PlayerModelPath);
+
+        bool changed = importer.animationType != ModelImporterAnimationType.Human
+                       || importer.avatarSetup != ModelImporterAvatarSetup.CreateFromThisModel;
+        importer.animationType = ModelImporterAnimationType.Human;
+        importer.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+        if (changed) importer.SaveAndReimport();
+
+        importer = (ModelImporter)AssetImporter.GetAtPath(PlayerModelPath);
+        var avatar = AssetDatabase.LoadAssetAtPath<Avatar>(PlayerModelPath);
+        if (!avatar || !avatar.isValid || !avatar.isHuman)
+            throw new System.InvalidOperationException("character01 휴머노이드 본 자동 매핑에 실패했습니다.");
+        var humanDescription = avatar.humanDescription;
+        var humanBones = new System.Collections.Generic.List<HumanBone>(humanDescription.human);
+        bool mappingChanged = importer.autoGenerateAvatarMappingIfUnspecified;
+        for (int i = humanBones.Count - 1; i >= 0; i--)
+            if (IsOptionalFaceBone(humanBones[i].humanName)) { humanBones.RemoveAt(i); mappingChanged = true; }
+        if (mappingChanged)
+        {
+            humanDescription.human = humanBones.ToArray();
+            importer.humanDescription = humanDescription;
+            importer.autoGenerateAvatarMappingIfUnspecified = false;
+            importer.SaveAndReimport();
+        }
+
+        importer = (ModelImporter)AssetImporter.GetAtPath(PlayerModelPath);
+        Directory.CreateDirectory(PlayerTextureFolder);
+        AssetDatabase.Refresh();
+        if (!HasPlayerImages())
+        {
+            if (!importer.ExtractTextures(PlayerTextureFolder))
+                Debug.LogWarning("[V0.1] character01 내장 텍스처 추출에 실패했습니다. Self Check에서 확인하세요.");
+            AssetDatabase.Refresh();
+        }
+        FixPlayerTextureExtensions();
+
+        avatar = AssetDatabase.LoadAssetAtPath<Avatar>(PlayerModelPath);
+        if (!avatar || !avatar.isValid || !avatar.isHuman)
+            throw new System.InvalidOperationException("character01 휴머노이드 본 자동 매핑에 실패했습니다.");
+
+        var missing = new System.Collections.Generic.List<string>();
+        for (int i = 0; i < PlayerClipNames.Length; i++)
+        {
+            string path = PlayerCharacterFolder + "/character01@" + PlayerClipNames[i] + ".fbx";
+            var clipImporter = AssetImporter.GetAtPath(path) as ModelImporter;
+            if (!clipImporter) { missing.Add(PlayerClipNames[i]); continue; }
+
+            bool rigChanged = clipImporter.animationType != ModelImporterAnimationType.Human
+                              || clipImporter.avatarSetup != ModelImporterAvatarSetup.CreateFromThisModel
+                              || clipImporter.sourceAvatar
+                              || !clipImporter.preserveHierarchy
+                              || !clipImporter.importAnimation;
+            clipImporter.animationType = ModelImporterAnimationType.Human;
+            clipImporter.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+            clipImporter.sourceAvatar = null;
+            clipImporter.preserveHierarchy = true;
+            clipImporter.importAnimation = true;
+            if (rigChanged) clipImporter.SaveAndReimport();
+
+            clipImporter = (ModelImporter)AssetImporter.GetAtPath(path);
+            var clips = clipImporter.clipAnimations;
+            bool clipChanged = false;
+            if (clips.Length == 0 && clipImporter.importedTakeInfos.Length > 0)
+            {
+                clips = clipImporter.defaultClipAnimations;
+                clipChanged = true;
+            }
+            for (int c = 0; c < clips.Length; c++)
+            {
+                bool loop = i < 3;
+                clipChanged |= clips[c].loopTime != loop || !clips[c].lockRootRotation
+                               || !clips[c].lockRootHeightY || !clips[c].lockRootPositionXZ;
+                clips[c].loopTime = loop;
+                clips[c].lockRootRotation = true;
+                clips[c].lockRootHeightY = true;
+                clips[c].lockRootPositionXZ = true;
+            }
+            if (clipChanged)
+            {
+                clipImporter.clipAnimations = clips;
+                clipImporter.SaveAndReimport();
+            }
+        }
+        if (missing.Count > 0) Debug.LogWarning("[V0.1] 없는 클립: " + string.Join(", ", missing));
+
+        var model = AssetDatabase.LoadAssetAtPath<GameObject>(PlayerModelPath);
+        if (!model) throw new System.InvalidOperationException("character01 모델을 불러오지 못했습니다.");
+        if (MeasureModelHeight(model) <= 0.01f)
+            throw new System.InvalidOperationException("character01 모델 높이를 측정하지 못했습니다.");
+
+        EnsurePlayerMaterials(model);
+        return model;
+    }
+
+    static void EnsurePlayerMaterials(GameObject model)
+    {
+        Directory.CreateDirectory(PlayerMaterialFolder);
+        AssetDatabase.Refresh();
+        var shader = Shader.Find("Universal Render Pipeline/Lit");
+        if (!shader) throw new System.InvalidOperationException("URP Lit 쉐이더를 찾지 못했습니다.");
+
+        var done = new System.Collections.Generic.HashSet<string>();
+        var renderers = model.GetComponentsInChildren<Renderer>(true);
+        for (int r = 0; r < renderers.Length; r++)
+        for (int m = 0; m < renderers[r].sharedMaterials.Length; m++)
+        {
+            var source = renderers[r].sharedMaterials[m];
+            if (!source || !done.Add(source.name)) continue;
+
+            string[] mapping = null;
+            for (int i = 0; i < PlayerMaterialTextures.Length; i++)
+                if (PlayerMaterialTextures[i][0] == source.name) { mapping = PlayerMaterialTextures[i]; break; }
+            if (mapping == null)
+                throw new System.InvalidOperationException("character01 FBX의 텍스처 매핑을 알 수 없는 재질입니다: " + source.name);
+            string basePath = PlayerTextureFolder + "/" + mapping[1];
+            string normalPath = PlayerTextureFolder + "/" + mapping[2];
+            var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(basePath);
+            var normal = AssetDatabase.LoadAssetAtPath<Texture2D>(normalPath);
+            if (!texture || !normal)
+                throw new System.IO.FileNotFoundException(source.name + " 텍스처가 없습니다: " + basePath + ", " + normalPath);
+            var normalImporter = AssetImporter.GetAtPath(normalPath) as TextureImporter;
+            if (normalImporter && normalImporter.textureType != TextureImporterType.NormalMap)
+            {
+                normalImporter.textureType = TextureImporterType.NormalMap;
+                normalImporter.SaveAndReimport();
+                normal = AssetDatabase.LoadAssetAtPath<Texture2D>(normalPath);
+            }
+
+            string path = PlayerMaterialFolder + "/" + source.name + ".mat";
+            var material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (!material)
+            {
+                material = new Material(shader);
+                AssetDatabase.CreateAsset(material, path);
+            }
+            bool materialChanged = material.shader != shader
+                                   || material.GetTexture("_BaseMap") != texture
+                                   || material.GetTexture("_BumpMap") != normal
+                                   || !material.IsKeywordEnabled("_NORMALMAP");
+            if (materialChanged)
+            {
+                material.shader = shader;
+                material.SetTexture("_BaseMap", texture);
+                material.SetTexture("_BumpMap", normal);
+                material.EnableKeyword("_NORMALMAP");
+                if (source.HasProperty("_BaseColor")) material.SetColor("_BaseColor", source.GetColor("_BaseColor"));
+                else if (source.HasProperty("_Color")) material.SetColor("_BaseColor", source.GetColor("_Color"));
+                EditorUtility.SetDirty(material);
+            }
+            Debug.Log("[V0.1] " + source.name + ": _BaseMap <- " + mapping[1] + ", _BumpMap <- " + mapping[2]);
+        }
+        AssetDatabase.SaveAssets();
+    }
+
+    static bool HasPlayerImages()
+    {
+        var files = Directory.GetFiles(PlayerTextureFolder);
+        for (int i = 0; i < files.Length; i++)
+            if (PlayerImageExtension(files[i]) != null) return true;
+        return false;
+    }
+
+    static void FixPlayerTextureExtensions()
+    {
+        var files = Directory.GetFiles(PlayerTextureFolder);
+        for (int i = 0; i < files.Length; i++)
+        {
+            if (Path.GetExtension(files[i]).Length > 0) continue;
+            string extension = PlayerImageExtension(files[i]);
+            if (extension == null) continue;
+            string path = files[i].Replace(Path.DirectorySeparatorChar, (char)47);
+            string error = AssetDatabase.MoveAsset(path, path + extension);
+            if (!string.IsNullOrEmpty(error)) throw new System.IO.IOException(error);
+        }
+        AssetDatabase.Refresh();
+
+        files = Directory.GetFiles(PlayerTextureFolder);
+        for (int i = 0; i < files.Length; i++)
+        {
+            if (PlayerImageExtension(files[i]) == null) continue;
+            string path = files[i].Replace(Path.DirectorySeparatorChar, (char)47);
+            var textureImporter = AssetImporter.GetAtPath(path) as TextureImporter;
+            if (!textureImporter || textureImporter.textureShape == TextureImporterShape.Texture2D) continue;
+            textureImporter.textureShape = TextureImporterShape.Texture2D;
+            textureImporter.SaveAndReimport();
+        }
+    }
+
+    static string PlayerImageExtension(string path)
+    {
+        var signature = new byte[8];
+        int count;
+        using (var stream = File.OpenRead(path)) count = stream.Read(signature, 0, signature.Length);
+        if (count >= 8 && signature[0] == 0x89 && signature[1] == 0x50 && signature[2] == 0x4e
+            && signature[3] == 0x47 && signature[4] == 0x0d && signature[5] == 0x0a
+            && signature[6] == 0x1a && signature[7] == 0x0a) return ".png";
+        if (count >= 3 && signature[0] == 0xff && signature[1] == 0xd8 && signature[2] == 0xff) return ".jpg";
+        return null;
+    }
+
+    static bool IsOptionalFaceBone(string name) => name == "LeftEye" || name == "RightEye" || name == "Jaw";
+
+    static string HumanBoneName(HumanDescription description, string humanName)
+    {
+        for (int i = 0; i < description.human.Length; i++)
+            if (description.human[i].humanName == humanName) return description.human[i].boneName;
+        return null;
+    }
+
+    static void ApplyPlayerMaterials(GameObject visual)
+    {
+        var renderers = visual.GetComponentsInChildren<Renderer>(true);
+        for (int r = 0; r < renderers.Length; r++)
+        {
+            var materials = renderers[r].sharedMaterials;
+            for (int m = 0; m < materials.Length; m++)
+            {
+                if (!materials[m]) continue;
+                var replacement = AssetDatabase.LoadAssetAtPath<Material>(
+                    PlayerMaterialFolder + "/" + materials[m].name + ".mat");
+                if (!replacement)
+                {
+                    Debug.LogWarning("[V0.1] " + materials[m].name + " 플레이어 재질이 없습니다. Self Check에서 확인하세요.");
+                    continue;
+                }
+                materials[m] = replacement;
+            }
+            renderers[r].sharedMaterials = materials;
+        }
+    }
+
+    static UnityEditor.Animations.AnimatorController EnsurePlayerController()
+    {
+        Directory.CreateDirectory(AnimationFolder);
+        var idle = LoadPlayerClip("Idle");
+        var walk = LoadPlayerClip("Walk");
+        var run = LoadPlayerClip("Run");
+        var attack = LoadPlayerClip("Attack");
+        var attackOneHand = LoadPlayerClip("AttackOneHand");
+        var death = LoadPlayerClip("Death");
+
+        var controller = AssetDatabase.LoadAssetAtPath<UnityEditor.Animations.AnimatorController>(PlayerControllerPath);
+        if (!controller)
+            controller = UnityEditor.Animations.AnimatorController.CreateAnimatorControllerAtPath(PlayerControllerPath);
+        for (int i = controller.parameters.Length - 1; i >= 0; i--) controller.RemoveParameter(i);
+        controller.AddParameter("Speed", AnimatorControllerParameterType.Float);
+        controller.AddParameter("Attack", AnimatorControllerParameterType.Trigger);
+        controller.AddParameter("AttackOneHand", AnimatorControllerParameterType.Trigger);
+        controller.AddParameter("Dead", AnimatorControllerParameterType.Bool);
+
+        var machine = controller.layers[0].stateMachine;
+        var oldAnyTransitions = machine.anyStateTransitions;
+        for (int i = 0; i < oldAnyTransitions.Length; i++) machine.RemoveAnyStateTransition(oldAnyTransitions[i]);
+        var oldStates = machine.states;
+        for (int i = 0; i < oldStates.Length; i++) machine.RemoveState(oldStates[i].state);
+        var idleState = machine.AddState("Idle");
+        idleState.motion = idle;
+        var walkState = machine.AddState("Walk");
+        walkState.motion = walk;
+        var runState = machine.AddState("Run");
+        runState.motion = run;
+        var attackState = machine.AddState("Attack");
+        attackState.motion = attack;
+        var attackOneHandState = machine.AddState("AttackOneHand");
+        attackOneHandState.motion = attackOneHand;
+        var deathState = machine.AddState("Death");
+        deathState.motion = death;
+        machine.defaultState = idleState;
+
+        var idleToWalk = idleState.AddTransition(walkState);
+        idleToWalk.hasExitTime = false;
+        idleToWalk.duration = 0.15f;
+        idleToWalk.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Greater, 0.1f, "Speed");
+        var walkToIdle = walkState.AddTransition(idleState);
+        walkToIdle.hasExitTime = false;
+        walkToIdle.duration = 0.15f;
+        walkToIdle.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Less, 0.1f, "Speed");
+        var walkToRun = walkState.AddTransition(runState);
+        walkToRun.hasExitTime = false;
+        walkToRun.duration = 0.15f;
+        walkToRun.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Greater, 1.4f, "Speed");
+        var runToWalk = runState.AddTransition(walkState);
+        runToWalk.hasExitTime = false;
+        runToWalk.duration = 0.15f;
+        runToWalk.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Less, 1.4f, "Speed");
+
+        var attackStates = new[] { attackState, attackOneHandState };
+        for (int i = 0; i < attackStates.Length; i++)
+        {
+            var attackClip = attackStates[i].motion;
+            var toAttack = machine.AddAnyStateTransition(attackStates[i]);
+            toAttack.hasExitTime = false;
+            toAttack.duration = 0.05f;
+            toAttack.canTransitionToSelf = false;
+            toAttack.AddCondition(UnityEditor.Animations.AnimatorConditionMode.If, 0f, attackStates[i].name);
+            toAttack.AddCondition(UnityEditor.Animations.AnimatorConditionMode.IfNot, 0f, "Dead");
+
+            var attackToRun = attackStates[i].AddTransition(runState);
+            attackToRun.hasExitTime = attackClip;
+            attackToRun.exitTime = 0.85f;
+            attackToRun.duration = 0.12f;
+            attackToRun.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Greater, 1.4f, "Speed");
+            var attackToWalk = attackStates[i].AddTransition(walkState);
+            attackToWalk.hasExitTime = attackClip;
+            attackToWalk.exitTime = 0.85f;
+            attackToWalk.duration = 0.12f;
+            attackToWalk.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Greater, 0.1f, "Speed");
+            attackToWalk.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Less, 1.4f, "Speed");
+            var attackToIdle = attackStates[i].AddTransition(idleState);
+            attackToIdle.hasExitTime = attackClip;
+            attackToIdle.exitTime = 0.85f;
+            attackToIdle.duration = 0.12f;
+            attackToIdle.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Less, 0.1f, "Speed");
+        }
+
+        var toDeath = machine.AddAnyStateTransition(deathState);
+        toDeath.hasExitTime = false;
+        toDeath.duration = 0.08f;
+        toDeath.canTransitionToSelf = false;
+        toDeath.AddCondition(UnityEditor.Animations.AnimatorConditionMode.If, 0f, "Dead");
+        var revive = deathState.AddTransition(idleState);
+        revive.hasExitTime = false;
+        revive.duration = 0.08f;
+        revive.AddCondition(UnityEditor.Animations.AnimatorConditionMode.IfNot, 0f, "Dead");
+
+        AssetDatabase.SaveAssets();
+        return controller;
+    }
+
+    static AnimationClip LoadPlayerClip(string name)
+    {
+        string path = PlayerCharacterFolder + "/character01@" + name + ".fbx";
+        var all = AssetDatabase.LoadAllAssetsAtPath(path);
+        for (int i = 0; i < all.Length; i++)
+        {
+            var clip = all[i] as AnimationClip;
+            if (clip != null && !clip.name.StartsWith("__preview")) return clip;
+        }
+        return null;
+    }
+
+    // ---- 좀비 3D 모델 + 애니메이션 ----
     const string ZombieModelPath = "Assets/RigValidationZombi1/zombi1_humanoid.fbx";
     const string ZombieControllerPath = AnimationFolder + "/Zombie.controller";
 
@@ -4810,7 +5352,7 @@ public static class V01SceneBuilder
     const float WallSegmentLength = 2f;   // 벽을 이만큼씩 쪼갠다 (가리는 조각만 흐려지도록)
     const float WindowSillTop = 0.9f;     // 창턱. 걸어서는 못 지나가고 Space 로 넘어야 한다
     const float WindowTop = 2f;           // 눈높이가 이 사이에 있어야 열린 창 너머가 보인다
-    const float BodyY = 1.05f;            // CharacterController 캡슐 중심 높이
+    const float BodyY = PlayerHeight * 0.5f + 0.05f; // 캡슐 밑면을 지면에서 5cm 띄운다
 
     /// <summary>spans 에서 [from, to] 구간을 잘라낸다.</summary>
     static void CutSpan(System.Collections.Generic.List<Vector2> spans, float from, float to)
@@ -4858,11 +5400,11 @@ public static class V01SceneBuilder
     // 문 높이는 두 가지에 동시에 걸린다.
     //  - NavMesh: 에이전트 높이 2.0m 보다 낮으면 문간이 통째로 버려져 실내가 고립된 섬이 된다.
     //  - CharacterController: 턱을 넘으려고 stepOffset 만큼 몸을 들어올리는데, 그때
-    //    머리(2.08m) + stepOffset 이 인방에 닿으면 문이 안 열린 것처럼 막힌다.
+    //    머리(1.73m) + stepOffset 이 인방에 닿으면 문이 안 열린 것처럼 막힌다.
     //    stepOffset 0.75 일 때 실제로 어느 문도 통과하지 못했다.
     const float DoorHeight = 2.6f;
     const float CounterHeight = 0.95f;
-    const float CeilingThickness = 0.3f;  // 눈높이(1.35) 아래라 시야를 막지 않는다
+    const float CeilingThickness = 0.3f;  // 눈높이(1.15) 아래라 시야를 막지 않는다
 
     // 아래 좌표는 평면도의 미터 값 그대로 쓰고, 여기서 한 번에 키운다.
     //
