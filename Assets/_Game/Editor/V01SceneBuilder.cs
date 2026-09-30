@@ -1880,6 +1880,7 @@ public static class V01SceneBuilder
             Check(stats.IsDead, "HP 0이면 사망");
 
             CheckInventory();
+            CheckDebugAllWeapons();
             CheckClock();
             CheckSurvival();
             CheckEquipment();
@@ -2967,6 +2968,63 @@ public static class V01SceneBuilder
             if (stacks[i].definition && stacks[i].definition.id == id) return stacks[i];
 
         return null;
+    }
+
+    /// <summary>테스트 시작 시 무기 17종과 탄약 4종이 인벤토리와 상자에 빠짐없이 나뉘는지 검증.</summary>
+    static void CheckDebugAllWeapons()
+    {
+        var catalog = AssetDatabase.LoadAssetAtPath<ItemCatalog>(ItemDataFolder + "/ItemCatalog.asset");
+        var holder = new GameObject("__DebugAllWeaponsSelfCheck");
+        var box = new GameObject("__DebugAllWeaponsBoxSelfCheck");
+        try
+        {
+            var inventory = holder.AddComponent<PlayerInventory>();
+            var container = box.AddComponent<WorldContainer>();
+            var method = typeof(DebugStartState).GetMethod("DistributeAllWeaponsAndAmmo",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            var args = new object[] { catalog, inventory, container, 0, 0 };
+            method.Invoke(null, args);
+
+            int weapons = 0;
+            int ammoTypes = 0;
+            int weaponCells = 0;
+            for (int i = 0; i < catalog.Count; i++)
+            {
+                var definition = catalog.Get(i);
+                if (!definition) continue;
+
+                bool isAmmo = definition.id.StartsWith("ammo_");
+                bool isWeapon = definition.handedness != WeaponHandedness.None || definition.isShield;
+                if (!isAmmo && !isWeapon) continue;
+
+                if (isAmmo) ammoTypes++;
+                else
+                {
+                    weapons++;
+                    weaponCells += definition.gridSize.x * definition.gridSize.y;
+                }
+
+                int quantity = 0;
+                var stacks = inventory.Stacks;
+                for (int s = 0; s < stacks.Count; s++)
+                    if (stacks[s].definition == definition) quantity += stacks[s].quantity;
+                var contents = container.Contents;
+                for (int c = 0; c < contents.Count; c++)
+                    if (contents[c].definition == definition) quantity += contents[c].quantity;
+
+                Check(quantity == (isAmmo ? 60 : 1), definition.id + " 인벤토리+상자 지급 수량");
+            }
+
+            Check(weapons == 17, "테스트 시작 무기·방패 17종");
+            Check(ammoTypes == 4, "테스트 시작 탄약 4종");
+            Check(weaponCells == 94, "테스트 시작 무기·방패 합계 94칸");
+            Check(container.Count > 0, "48칸을 넘는 아이템은 테스트 상자에 보관");
+        }
+        finally
+        {
+            Object.DestroyImmediate(box);
+            Object.DestroyImmediate(holder);
+        }
     }
 
     /// <summary>GDD 16·17·18·19·21·22항: 좀비 3종 / 감지 / 청각 / 암살 / 방패 / 돌진.</summary>

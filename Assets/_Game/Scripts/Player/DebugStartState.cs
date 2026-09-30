@@ -9,6 +9,8 @@ using UnityEngine;
 /// </summary>
 public class DebugStartState : MonoBehaviour
 {
+    const string TestChestName = "테스트 무기 상자";
+
     [SerializeField] bool enabledOnStart = true;
 
     [Header("생존 수치 시작값 (0~100)")]
@@ -26,6 +28,7 @@ public class DebugStartState : MonoBehaviour
         "kitchen_knife", "riot_shield", "pistol", "ammo_pistol",
         "bandage", "water_bottle", "canned_food",
     };
+    [SerializeField] bool giveAllWeapons = true;
     [SerializeField] ItemCatalog catalog;
     [Tooltip("시작 무기를 자동으로 장착한다. 끄면 우클릭 착용을 직접 테스트할 수 있다")]
     [SerializeField] bool equipWeaponsOnStart = true;
@@ -55,7 +58,7 @@ public class DebugStartState : MonoBehaviour
     /// <summary>테스트용 시작 아이템. 카탈로그가 비어 있으면 씬의 SaveSystem 에서 빌려온다.</summary>
     void GiveStartingItems()
     {
-        if (startingItems == null || startingItems.Length == 0) return;
+        if ((startingItems == null || startingItems.Length == 0) && !giveAllWeapons) return;
 
         var inventory = GetComponent<PlayerInventory>();
         if (!inventory) return;
@@ -68,7 +71,7 @@ public class DebugStartState : MonoBehaviour
         }
 
         int given = 0;
-        for (int i = 0; i < startingItems.Length; i++)
+        for (int i = 0; startingItems != null && i < startingItems.Length; i++)
         {
             var definition = lookup.Find(startingItems[i]);
             if (!definition) continue;
@@ -86,6 +89,76 @@ public class DebugStartState : MonoBehaviour
 
         Debug.Log("[V0.1] 테스트 시작 아이템 " + given + "종 지급"
                   + (equipWeaponsOnStart ? " (무기 자동 장착)" : string.Empty));
+
+        if (giveAllWeapons) GiveAllWeaponsAndAmmo(lookup, inventory);
+    }
+
+    /// <summary>카탈로그의 모든 무기·방패와 탄약을 인벤토리 우선으로 지급한다.</summary>
+    void GiveAllWeaponsAndAmmo(ItemCatalog lookup, PlayerInventory inventory)
+    {
+        var chest = FindOrCreateTestChest();
+        int inventoryCount;
+        int chestCount;
+        DistributeAllWeaponsAndAmmo(lookup, inventory, chest, out inventoryCount, out chestCount);
+        Debug.Log("[V0.1] 전체 무기/탄약 지급 — 인벤토리 " + inventoryCount
+                  + "개, 테스트 상자 " + chestCount + "개");
+    }
+
+    static void DistributeAllWeaponsAndAmmo(ItemCatalog lookup, PlayerInventory inventory,
+                                            WorldContainer chest, out int inventoryCount,
+                                            out int chestCount)
+    {
+        inventoryCount = 0;
+        chestCount = 0;
+        for (int i = 0; i < lookup.Count; i++)
+        {
+            var definition = lookup.Get(i);
+            if (!definition) continue;
+
+            bool isAmmo = definition.id.StartsWith("ammo_");
+            if (!isAmmo && definition.handedness == WeaponHandedness.None && !definition.isShield) continue;
+
+            int amount = isAmmo ? 60 : 1;
+            int accepted = inventory.Add(definition, amount);
+            inventoryCount += accepted;
+            if (accepted >= amount) continue;
+
+            int overflow = amount - accepted;
+            chest.Add(definition, overflow);
+            chestCount += overflow;
+        }
+    }
+
+    WorldContainer FindOrCreateTestChest()
+    {
+        var containers = WorldContainer.All;
+        for (int i = 0; i < containers.Count; i++)
+            if (containers[i] && containers[i].DisplayName == TestChestName) return containers[i];
+
+        var size = new Vector3(1f, 0.8f, 1f);
+        var chest = WorldContainer.Spawn(TestChestName, FindTestChestPosition(size), size, null);
+        chest.gameObject.name = TestChestName;
+        return chest;
+    }
+
+    Vector3 FindTestChestPosition(Vector3 size)
+    {
+        var controller = GetComponent<CharacterController>();
+        float groundY = transform.position.y;
+        if (controller) groundY += controller.center.y - controller.height * 0.5f;
+
+        var origin = new Vector3(transform.position.x, groundY, transform.position.z);
+        for (int i = 0; i < 16; i++)
+        {
+            var direction = Quaternion.Euler(0f, i * 22.5f, 0f) * Vector3.right;
+            var position = origin + direction * 1.5f;
+            var center = position + Vector3.up * (size.y * 0.5f);
+            if (!Physics.CheckBox(center, size * 0.45f, Quaternion.identity, ~0,
+                                  QueryTriggerInteraction.Ignore)) return position;
+        }
+
+        Debug.LogWarning("[V0.1] 테스트 무기 상자의 빈 배치 지점을 찾지 못해 플레이어 오른쪽에 둡니다.");
+        return origin + Vector3.right * 1.5f;
     }
 
     /// <summary>

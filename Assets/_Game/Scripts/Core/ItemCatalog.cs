@@ -12,6 +12,9 @@ public class ItemCatalog : ScriptableObject
 
     public int Count => items != null ? items.Length : 0;
 
+    public ItemDefinition Get(int index) =>
+        items != null && index >= 0 && index < items.Length ? items[index] : null;
+
     public ItemDefinition Find(string id)
     {
         if (items == null || string.IsNullOrEmpty(id)) return null;
