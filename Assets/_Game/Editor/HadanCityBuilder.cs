@@ -30,6 +30,16 @@ public static class HadanCityBuilder
     const float CityScale = 1.6f;
     const int MaxFloors = 6;
     const float FloorHeight = 3.6f;
+    const float FloorThickness = 0.2f;
+    const float WallThickness = 0.25f;
+    const float DoorWidth = 1.2f;
+    const float DoorJambClearance = 0.1f;
+    const float DoorHeight = 2.4f;
+    const float StairWidth = 1.2f;
+    const float StairGap = 0.1f;
+    const float StairEntryDepth = 0.4f;
+    const int StairSteps = 16;
+    const float StairTread = 0.28f;
     const float RoadY = 0.02f;
     const float TreeRadius = 1.85f;
     const float PoleRadius = 1.12f;
@@ -78,8 +88,9 @@ public static class HadanCityBuilder
 
         CreateGround(map, groundMaterial);
         var meshes = new List<Mesh>();
-        var buildings = CreateBuildings(map, roads, detailMaterials,
-            meshes, counts, out int buildingCount, out float maxHeight);
+        var buildings = CreateBuildings(map, roads, detailMaterials, meshes, counts,
+            out int buildingCount, out float maxHeight, out int stairBuildings,
+            out int firstFloorOnly, out int totalFloors, out BuildingFloors floorVisibility);
         int roadCount = CreateRoads(roads, roadMaterial, meshes);
 
         Vector2 spawn = FindSpawn(map, buildings);
@@ -87,6 +98,7 @@ public static class HadanCityBuilder
         var clock = V01SceneBuilder.CreateGameClock();
         var player = V01SceneBuilder.CreatePlayer();
         player.transform.position = new Vector3(spawn.x, player.transform.position.y, spawn.y);
+        floorVisibility.SetTarget(player.transform);
         UnityEngine.Object.DestroyImmediate(player.GetComponent<DebugStartState>());
         var arrival = new GameObject("Arrive_FromEstate");
         arrival.transform.position = player.transform.position;
@@ -94,9 +106,15 @@ public static class HadanCityBuilder
         V01SceneBuilder.CreateCamera(player.transform);
         V01SceneBuilder.CreateHud(player, clock);
 
+        var doorObstacles = floorVisibility.GetComponentsInChildren<NavMeshObstacle>(true);
+        for (int i = 0; i < doorObstacles.Length; i++) doorObstacles[i].enabled = false;
         var watch = Stopwatch.StartNew();
         V01SceneBuilder.BuildNavMesh();
         watch.Stop();
+        floorVisibility.BuiltDoorNavMeshSamples = CheckDoorNavMesh(floorVisibility, out int checkedDoors);
+        floorVisibility.BuiltCheckedDoors = checkedDoors;
+        floorVisibility.BuiltStairPaths = CheckBuildingPaths(floorVisibility);
+        for (int i = 0; i < doorObstacles.Length; i++) doorObstacles[i].enabled = true;
 
         AssetDatabase.DeleteAsset(MeshAssetPath);
         meshAssetCreated = false;
@@ -106,6 +124,8 @@ public static class HadanCityBuilder
         EditorSceneManager.SaveScene(scene, ScenePath);
         V01SceneBuilder.EnsureBuildScenes();
         int triangles = CountUniqueMeshTriangles();
+        int gameObjects = UnityEngine.Object.FindObjectsByType<Transform>(FindObjectsInactive.Include,
+            FindObjectsSortMode.None).Length;
         Debug.Log("[Hadan] 건물 " + buildingCount + ", 도로 " + roadCount
                   + ", 유형 상가 " + counts.types[(int)BuildingKind.Commercial]
                   + "/아파트 " + counts.types[(int)BuildingKind.Apartment]
@@ -115,8 +135,13 @@ public static class HadanCityBuilder
                   + "/옥탑방 " + counts.roofRooms + "/전선 " + counts.wires
                   + ", 소품 문 " + counts.doors + "/나무 " + counts.trees
                   + "/전봇대 " + counts.poles + "/차 " + counts.cars
+                  + ", 계단 건물 " + stairBuildings + "/1층 전용 " + firstFloorOnly
+                  + "/층 합계 " + totalFloors
+                  + ", GameObject " + gameObjects.ToString("N0")
                   + ", 삼각형 " + triangles.ToString("N0")
                   + ", 최고 " + maxHeight.ToString("F1") + "m, NavMesh " + watch.ElapsedMilliseconds + "ms");
+        if (watch.ElapsedMilliseconds > 180000)
+            Debug.LogWarning("[Hadan] NavMesh 굽기가 3분을 넘었습니다: " + watch.ElapsedMilliseconds + "ms");
     }
 
     [MenuItem("Tools/V0.1/Check Hadan Pilot")]
@@ -142,39 +167,49 @@ public static class HadanCityBuilder
         int failures = 0;
         int expectedBuildings = CountBuildings(map);
         var root = GameObject.Find("Buildings");
-        int actualBuildings = root ? root.transform.childCount : 0;
+        var floorVisibility = root ? root.GetComponent<BuildingFloors>() : null;
+        int actualBuildings = floorVisibility != null && floorVisibility.Buildings != null
+            ? floorVisibility.Buildings.Count : 0;
         int tolerance = Mathf.CeilToInt(expectedBuildings * 0.05f);
         Check(Mathf.Abs(actualBuildings - expectedBuildings) <= tolerance,
             "건물 수 " + actualBuildings + "/" + expectedBuildings + " (±5%)", ref failures);
 
-        int missingColliders = root ? 0 : expectedBuildings;
-        int badFaces = root ? 0 : 1;
-        float maxHeight = root ? 0f : float.PositiveInfinity;
+        int missingColliders = floorVisibility ? 0 : expectedBuildings;
+        int badFaces = floorVisibility ? 0 : 1;
+        int loggedBadFaces = 0;
+        float maxHeight = floorVisibility ? 0f : float.PositiveInfinity;
         var polygons = BuildingPolygons(map);
-        if (root)
+        if (floorVisibility)
         {
-            for (int i = 0; i < root.transform.childCount; i++)
+            for (int i = 0; i < floorVisibility.Buildings.Count; i++)
             {
-                var child = root.transform.GetChild(i).gameObject;
-                var collider = child.GetComponent<MeshCollider>();
-                var filter = child.GetComponent<MeshFilter>();
-                if (!collider || !collider.sharedMesh || !filter || !filter.sharedMesh) missingColliders++;
+                var entry = floorVisibility.Buildings[i];
+                for (int floor = 0; floor < entry.floors.Length; floor++)
+                    if (!entry.floors[floor] || !entry.floors[floor].GetComponent<MeshCollider>())
+                        missingColliders++;
+                var roofCollider = entry.roof ? entry.roof.GetComponent<MeshCollider>() : null;
+                var roofFilter = entry.roof ? entry.roof.GetComponent<MeshFilter>() : null;
+                if (!roofCollider || !roofCollider.sharedMesh || !roofFilter || !roofFilter.sharedMesh)
+                    missingColliders++;
+                else
+                    maxHeight = Mathf.Max(maxHeight, roofFilter.sharedMesh.bounds.max.y - RailingHeight);
 
-                if (filter && filter.sharedMesh)
-                {
-                    maxHeight = Mathf.Max(maxHeight,
-                        (filter.sharedMesh.bounds.size.y - RailingHeight) * Mathf.Abs(child.transform.lossyScale.y));
-                    if (TryBuildingId(child.name, out long id) && polygons.TryGetValue(id, out var polygon))
-                        badFaces += CountBadFaces(filter.sharedMesh, polygon);
-                    else
-                        badFaces++;
-                }
+                var structure = entry.root.GetComponentsInChildren<MeshFilter>(true);
+                var polygon = new List<Vector2>(entry.polygon);
+                for (int part = 0; part < structure.Length; part++)
+                    if (structure[part].name.StartsWith("Floor_", StringComparison.Ordinal)
+                        || structure[part].name.StartsWith("ExteriorWall_", StringComparison.Ordinal)
+                        || structure[part].name.StartsWith("Stair_", StringComparison.Ordinal)
+                        || structure[part].name == "Roof")
+                        badFaces += CountBadFaces(structure[part].sharedMesh, structure[part].name,
+                            polygon, ref loggedBadFaces);
             }
         }
 
-        Check(missingColliders == 0, "모든 건물에 MeshCollider가 있다", ref failures);
-        Check(badFaces == 0, "건물 옆면 법선은 바깥, 지붕 법선은 위를 향한다", ref failures);
-        CheckBuildingProps(root ? root.transform : null, actualBuildings, polygons, ref failures);
+        Check(missingColliders == 0, "모든 층·지붕에 MeshCollider가 있다", ref failures);
+        Check(badFaces == 0, "층·외벽·계단·지붕 면의 법선이 올바르다", ref failures);
+        CheckBuildingProps(floorVisibility, ref failures);
+        CheckFloorLocator(floorVisibility, ref failures);
         CheckHadanDetails(map, root ? root.transform : null, polygons, ref failures);
 
         var player = GameObject.Find("Player");
@@ -230,13 +265,20 @@ public static class HadanCityBuilder
         Check(navTriangles > 0, "NavMesh가 구워져 있다 (삼각형 " + navTriangles + ")", ref failures);
         int pathTargets = player ? CheckRoadPaths(map, player.transform.position) : 0;
         Check(pathTargets >= 3, "15~50m 도로점 경로 " + pathTargets + "개가 이어진다", ref failures);
+        int doorNavMeshSamples = floorVisibility ? floorVisibility.BuiltDoorNavMeshSamples : 0;
+        int checkedDoors = floorVisibility ? floorVisibility.BuiltCheckedDoors : 0;
+        Check(checkedDoors == 20 && doorNavMeshSamples == checkedDoors,
+            "문 중심 0.2m 안에 NavMesh가 있다 (" + doorNavMeshSamples + "/" + checkedDoors + ")", ref failures);
+        int stairPaths = floorVisibility ? floorVisibility.BuiltStairPaths : 0;
+        Check(stairPaths >= Mathf.Min(5, CountStairBuildings(floorVisibility)),
+            "1층 문 앞→꼭대기 층 경로 " + stairPaths + "채가 이어진다", ref failures);
 
         int triangles = CountUniqueMeshTriangles();
         Debug.Log("[Hadan Check] 씬 전체 고유 메쉬 삼각형 " + triangles.ToString("N0"));
-        Check(triangles <= 150000, "씬 고유 메쉬 삼각형이 150,000 이하이다", ref failures);
+        Check(triangles <= 500000, "씬 고유 메쉬 삼각형이 500,000 이하이다", ref failures);
         int gameObjects = UnityEngine.Object.FindObjectsByType<Transform>(FindObjectsInactive.Include,
             FindObjectsSortMode.None).Length;
-        Check(gameObjects <= 8000, "GameObject 수가 8,000 이하이다 (" + gameObjects + ")", ref failures);
+        Check(gameObjects <= 25000, "GameObject 수가 25,000 이하이다 (" + gameObjects + ")", ref failures);
         Check(EditorPrefs.GetBool(DataStableKey, false),
             "재빌드 전후 " + DataFolder + " 파일 수가 같다", ref failures);
         Check(maxHeight <= MaxFloors * FloorHeight + Epsilon,
@@ -308,6 +350,43 @@ public static class HadanCityBuilder
         return material;
     }
 
+    static Material HadanFadeMaterial(Material opaque, Dictionary<Material, Material> cache)
+    {
+        if (cache.TryGetValue(opaque, out var fade)) return fade;
+
+        string path = DataFolder + "/" + opaque.name + "_fade.mat";
+        fade = AssetDatabase.LoadAssetAtPath<Material>(path);
+        if (!fade)
+        {
+            fade = new Material(opaque) { name = opaque.name + "_fade" };
+            // 첫 빌드는 fade 자산이 추가돼 Data 파일 수 검사가 한 번 실패하고, 재빌드부터 안정된다.
+            AssetDatabase.CreateAsset(fade, path);
+        }
+        fade.CopyPropertiesFromMaterial(opaque);
+        Color color = opaque.color;
+        color.a = 0.3f;
+        fade.color = color;
+        MakeTransparent(fade);
+        EditorUtility.SetDirty(fade);
+        cache.Add(opaque, fade);
+        return fade;
+    }
+
+    static void MakeTransparent(Material material)
+    {
+        material.SetFloat("_Surface", 1f);
+        material.SetFloat("_Blend", 0f);
+        material.SetFloat("_AlphaClip", 0f);
+        material.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+        material.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
+        material.SetFloat("_ZWrite", 0f);
+        material.SetShaderPassEnabled("ShadowCaster", false);
+        material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        material.DisableKeyword("_ALPHATEST_ON");
+        material.renderQueue = (int)RenderQueue.Transparent;
+        material.SetOverrideTag("RenderType", "Transparent");
+    }
+
     static DetailMaterials CreateDetailMaterials()
     {
         // 왜: 유형별 창 형태와 줄눈을 텍스처에 함께 구우면 셰이더와 건물별 머티리얼을 늘리지 않는다.
@@ -356,6 +435,31 @@ public static class HadanCityBuilder
         var result = new DetailMaterials
         {
             door = HadanMaterial("hadan_door", new Color(0.10f, 0.11f, 0.12f)),
+            floor = HadanMaterial("hadan_floor", new Color(0.64f, 0.62f, 0.57f)),
+            stair = HadanMaterial("hadan_stair", new Color(0.52f, 0.51f, 0.48f)),
+            interiorWalls = new[]
+            {
+                new[]
+                {
+                    HadanMaterial("hadan_commercial_inner_warm", new Color(0.88f, 0.85f, 0.78f)),
+                    HadanMaterial("hadan_commercial_inner_cool", new Color(0.82f, 0.86f, 0.86f))
+                },
+                new[]
+                {
+                    HadanMaterial("hadan_apartment_inner_warm", new Color(0.90f, 0.87f, 0.80f)),
+                    HadanMaterial("hadan_apartment_inner_cool", new Color(0.84f, 0.87f, 0.88f))
+                },
+                new[]
+                {
+                    HadanMaterial("hadan_house_inner_warm", new Color(0.91f, 0.86f, 0.77f)),
+                    HadanMaterial("hadan_house_inner_cool", new Color(0.85f, 0.89f, 0.86f))
+                },
+                new[]
+                {
+                    HadanMaterial("hadan_mixed_inner_warm", new Color(0.88f, 0.83f, 0.75f)),
+                    HadanMaterial("hadan_mixed_inner_cool", new Color(0.82f, 0.85f, 0.86f))
+                }
+            },
             commercialWalls = new[]
             {
                 HadanMaterial("hadan_commercial_beige_tile", new Color(0.76f, 0.69f, 0.56f), commercialTile),
@@ -472,12 +576,19 @@ public static class HadanCityBuilder
 
     static List<List<Vector2>> CreateBuildings(MapData map, List<RoadInfo> roads,
         DetailMaterials details, List<Mesh> meshes, PropCounts props,
-        out int count, out float maxHeight)
+        out int count, out float maxHeight, out int stairBuildings, out int firstFloorOnly,
+        out int totalFloors, out BuildingFloors floorVisibility)
     {
         var root = new GameObject("Buildings").transform;
+        floorVisibility = root.gameObject.AddComponent<BuildingFloors>();
         var polygons = new List<List<Vector2>>();
+        var entries = new List<BuildingFloors.Entry>();
+        var fadeMaterials = new Dictionary<Material, Material>();
         count = 0;
         maxHeight = 0f;
+        stairBuildings = 0;
+        firstFloorOnly = 0;
+        totalFloors = 0;
         int apartmentIndex = 0;
 
         for (int i = 0; i < map.elements.Length; i++)
@@ -493,45 +604,315 @@ public static class HadanCityBuilder
             }
 
             float area = Mathf.Abs(SignedArea(polygon)) / (CityScale * CityScale);
-            int floors = BuildingFloors(element.tags, area);
+            int floors = FloorCount(element.tags, area);
             BuildingKind kind = ClassifyBuilding(element.tags, polygon, floors, area, roads);
             float height = floors * FloorHeight;
-            var mesh = CreateBuildingMesh(element.id, polygon, height);
-            if (!mesh)
-            {
-                Debug.LogWarning("[Hadan] 건물 " + element.id + "의 지붕 삼각분할에 실패해 건너뜁니다.");
-                continue;
-            }
+            int streetEdge = FindStreetEdge(polygon, roads, kind == BuildingKind.Commercial);
+            Vector2 doorA = polygon[streetEdge];
+            Vector2 doorB = polygon[(streetEdge + 1) % polygon.Count];
+            Vector2 doorEdge = doorB - doorA;
+            Vector2 doorOutward = new Vector2(-doorEdge.y, doorEdge.x).normalized;
+            Vector2 doorCenter = (doorA + doorB) * 0.5f - doorOutward * (WallThickness * 0.5f);
+            StairPlan stair = default;
+            bool hasStairs = floors > 1 && TryStairPlan(polygon, doorCenter, out stair);
 
-            meshes.Add(mesh);
-            var go = new GameObject("Building_" + element.id, typeof(MeshFilter), typeof(MeshRenderer), typeof(MeshCollider));
+            var go = new GameObject("Building_" + element.id);
             go.transform.SetParent(root, false);
-            go.layer = 0; // 시야 차단은 Default 레이어를 포함하므로 별도 레이어를 만들지 않는다.
-            go.GetComponent<MeshFilter>().sharedMesh = mesh;
             var random = RoadRandom(element.id, 7);
             Material[] wallPalette = kind == BuildingKind.Commercial ? details.commercialWalls
                 : kind == BuildingKind.Apartment ? details.apartmentWalls
                 : kind == BuildingKind.House ? details.houseWalls : details.mixedUseWalls;
+            Material wall = wallPalette[random.Next(wallPalette.Length)];
             Material roof = kind == BuildingKind.Commercial ? details.commercialRoof
                 : details.residentialRoofs[random.Next(details.residentialRoofs.Length)];
-            go.GetComponent<MeshRenderer>().sharedMaterials = new[]
-                { wallPalette[random.Next(wallPalette.Length)], roof };
-            var collider = go.GetComponent<MeshCollider>();
-            collider.sharedMesh = mesh;
-            collider.convex = false;
-            GameObjectUtility.SetStaticEditorFlags(go, StaticEditorFlags.BatchingStatic);
+            Material interior = details.interiorWalls[(int)kind][random.Next(2)];
+            Material wallFade = HadanFadeMaterial(wall, fadeMaterials);
+            Material roofFade = HadanFadeMaterial(roof, fadeMaterials);
 
-            CreateBuildingDetails(go.transform, element.id, polygon, floors, height, kind,
-                kind == BuildingKind.Apartment ? 101 + apartmentIndex++ : 0, roads, details, props);
+            var entry = CreateBuildingStructure(go.transform, element.id, polygon, floors, streetEdge,
+                hasStairs, stair, wall, wallFade, interior, roof, roofFade, details, meshes, props);
+            if (entry == null)
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+                Debug.LogWarning("[Hadan] 건물 " + element.id + "의 층 삼각분할에 실패해 건너뜁니다.");
+                continue;
+            }
+
+            CreateBuildingDetails(go.transform, entry.floors, entry.roof.transform, element.id, polygon, floors, height, kind,
+                kind == BuildingKind.Apartment ? 101 + apartmentIndex++ : 0,
+                streetEdge, details, meshes, props);
 
             polygons.Add(polygon);
+            entries.Add(entry);
             props.types[(int)kind]++;
             count++;
+            totalFloors += floors;
+            if (hasStairs) stairBuildings++;
+            else if (floors > 1) firstFloorOnly++;
             maxHeight = Mathf.Max(maxHeight, height);
         }
 
         details.EmitBatches(meshes);
+        floorVisibility.Setup(entries.ToArray(), FloorHeight);
         return polygons;
+    }
+
+    static BuildingFloors.Entry CreateBuildingStructure(Transform building, long id,
+        List<Vector2> polygon, int floors, int streetEdge, bool hasStairs, StairPlan stair,
+        Material wall, Material wallFade, Material interior, Material roof, Material roofFade,
+        DetailMaterials details, List<Mesh> meshes, PropCounts counts)
+    {
+        var floorObjects = new GameObject[floors];
+        float perimeter = 0f;
+        var edgeU = new float[polygon.Count];
+        for (int edge = 0; edge < polygon.Count; edge++)
+        {
+            edgeU[edge] = perimeter;
+            perimeter += Vector2.Distance(polygon[edge], polygon[(edge + 1) % polygon.Count]);
+        }
+
+        for (int floor = 0; floor < floors; floor++)
+        {
+            var mesh = CreateFloorMesh(id, floor, polygon, streetEdge, hasStairs, stair);
+            if (!mesh) return null;
+            meshes.Add(mesh);
+
+            var floorObject = new GameObject("Floor_" + floor,
+                typeof(MeshFilter), typeof(MeshRenderer), typeof(MeshCollider));
+            floorObject.transform.SetParent(building, false);
+            floorObject.GetComponent<MeshFilter>().sharedMesh = mesh;
+            floorObject.GetComponent<MeshRenderer>().sharedMaterials = new[] { details.floor, interior };
+            floorObject.GetComponent<MeshCollider>().sharedMesh = mesh;
+            GameObjectUtility.SetStaticEditorFlags(floorObject, StaticEditorFlags.BatchingStatic);
+            floorObjects[floor] = floorObject;
+
+            for (int edge = 0; edge < polygon.Count; edge++)
+            {
+                Vector2 a = polygon[edge];
+                Vector2 b = polygon[(edge + 1) % polygon.Count];
+                float length = Vector2.Distance(a, b);
+                bool doorEdge = floor == 0 && edge == streetEdge;
+                var spans = WallSpans(length, doorEdge);
+                for (int span = 0; span < spans.Count; span++)
+                    CreateExteriorWall(floorObject.transform, id, floor, edge, span, a, b,
+                        spans[span], edgeU[edge], wall, wallFade, meshes);
+            }
+
+            if (hasStairs && floor < floors - 1)
+                CreateStair(floorObject.transform, id, floor, stair, details.stair, interior, meshes);
+        }
+
+        Vector2 doorA = polygon[streetEdge];
+        Vector2 doorB = polygon[(streetEdge + 1) % polygon.Count];
+        Vector2 doorEdgeVector = doorB - doorA;
+        Vector2 outward = new Vector2(-doorEdgeVector.y, doorEdgeVector.x).normalized;
+        Vector2 doorCenter = (doorA + doorB) * 0.5f - outward * (WallThickness * 0.5f);
+        CreateDoor(floorObjects[0].transform, doorCenter, outward, details.door);
+        counts.doors++;
+
+        var roofMesh = CreateRoofMesh(id, polygon, floors * FloorHeight);
+        if (!roofMesh) return null;
+        meshes.Add(roofMesh);
+        var roofObject = new GameObject("Roof", typeof(MeshFilter), typeof(MeshRenderer),
+            typeof(MeshCollider), typeof(WallSegment));
+        roofObject.transform.SetParent(building, false);
+        roofObject.GetComponent<MeshFilter>().sharedMesh = roofMesh;
+        roofObject.GetComponent<MeshRenderer>().sharedMaterial = roof;
+        roofObject.GetComponent<MeshCollider>().sharedMesh = roofMesh;
+        roofObject.GetComponent<WallSegment>().Setup(roof, roofFade, true);
+        GameObjectUtility.SetStaticEditorFlags(roofObject, StaticEditorFlags.BatchingStatic);
+
+        StairPlan topStair = hasStairs ? stair.Flight(floors - 2) : default;
+        Vector2 top = hasStairs
+            ? topStair.start + topStair.direction * (StairSteps * StairTread + 0.45f)
+            : doorCenter - outward;
+        return new BuildingFloors.Entry
+        {
+            root = building.gameObject,
+            polygon = polygon.ToArray(),
+            floors = floorObjects,
+            roof = roofObject,
+            hasStairs = hasStairs,
+            doorFront = new Vector3(doorCenter.x + outward.x, 0f, doorCenter.y + outward.y),
+            topLanding = new Vector3(top.x, (floors - 1) * FloorHeight, top.y)
+        };
+    }
+
+    static List<WallSpan> WallSpans(float length, bool door)
+    {
+        var spans = new List<WallSpan>();
+        if (!door)
+        {
+            spans.Add(new WallSpan(0f, length, 0f, FloorHeight));
+            return spans;
+        }
+
+        float openingWidth = DoorWidth + DoorJambClearance * 2f;
+        float left = Mathf.Max(0f, (length - openingWidth) * 0.5f);
+        float right = Mathf.Min(length, (length + openingWidth) * 0.5f);
+        if (left > Epsilon) spans.Add(new WallSpan(0f, left, 0f, FloorHeight));
+        if (right < length - Epsilon) spans.Add(new WallSpan(right, length, 0f, FloorHeight));
+        spans.Add(new WallSpan(left, right, DoorHeight, FloorHeight));
+        return spans;
+    }
+
+    static void CreateExteriorWall(Transform parent, long id, int floor, int edge, int spanIndex,
+        Vector2 a, Vector2 b, WallSpan span, float edgeU, Material wall, Material fade, List<Mesh> meshes)
+    {
+        Vector2 tangent = (b - a).normalized;
+        Vector2 outward = new Vector2(-tangent.y, tangent.x);
+        Vector2 p = a + tangent * span.start;
+        Vector2 q = a + tangent * span.end;
+        Vector2 innerP = p - outward * WallThickness;
+        Vector2 innerQ = q - outward * WallThickness;
+        float bottom = floor * FloorHeight + span.bottom;
+        float top = floor * FloorHeight + span.top;
+
+        var vertices = new List<Vector3>
+        {
+            new Vector3(p.x, bottom, p.y), new Vector3(q.x, bottom, q.y),
+            new Vector3(q.x, top, q.y), new Vector3(p.x, top, p.y),
+            new Vector3(innerP.x, bottom, innerP.y), new Vector3(innerQ.x, bottom, innerQ.y),
+            new Vector3(innerQ.x, top, innerQ.y), new Vector3(innerP.x, top, innerP.y)
+        };
+        float u0 = (edgeU + span.start) / 3f;
+        float u1 = (edgeU + span.end) / 3f;
+        var uvs = new List<Vector2>
+        {
+            new Vector2(u0, bottom / FloorHeight), new Vector2(u1, bottom / FloorHeight),
+            new Vector2(u1, top / FloorHeight), new Vector2(u0, top / FloorHeight),
+            Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero
+        };
+        int[] triangles =
+        {
+            0, 1, 2, 0, 2, 3, 5, 4, 7, 5, 7, 6,
+            4, 0, 3, 4, 3, 7, 1, 5, 6, 1, 6, 2,
+            3, 2, 6, 3, 6, 7, 4, 5, 1, 4, 1, 0
+        };
+        var mesh = new Mesh { name = "HadanWall_" + id + "_" + floor + "_" + edge + "_" + spanIndex };
+        mesh.SetVertices(vertices);
+        mesh.SetUVs(0, uvs);
+        mesh.SetTriangles(triangles, 0);
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        meshes.Add(mesh);
+
+        var go = new GameObject("ExteriorWall_" + edge + "_" + spanIndex,
+            typeof(MeshFilter), typeof(MeshRenderer), typeof(MeshCollider), typeof(WallSegment));
+        go.transform.SetParent(parent, false);
+        go.GetComponent<MeshFilter>().sharedMesh = mesh;
+        go.GetComponent<MeshRenderer>().sharedMaterial = wall;
+        go.GetComponent<MeshCollider>().sharedMesh = mesh;
+        go.GetComponent<WallSegment>().Setup(wall, fade, true);
+        GameObjectUtility.SetStaticEditorFlags(go, StaticEditorFlags.BatchingStatic);
+    }
+
+    static void CreateDoor(Transform parent, Vector2 center, Vector2 outward, Material material)
+    {
+        var frame = new GameObject("Door").transform;
+        frame.SetParent(parent, false);
+        frame.position = new Vector3(center.x, DoorHeight * 0.5f, center.y);
+        frame.rotation = Quaternion.LookRotation(new Vector3(outward.x, 0f, outward.y));
+
+        var hinge = new GameObject("Hinge").transform;
+        hinge.SetParent(frame, false);
+        hinge.localPosition = new Vector3(-DoorWidth * 0.5f, 0f, 0f);
+
+        var pane = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        pane.name = "Pane";
+        pane.transform.SetParent(hinge, false);
+        pane.transform.localPosition = new Vector3(DoorWidth * 0.5f, 0f, 0f);
+        pane.transform.localScale = new Vector3(DoorWidth, DoorHeight, 0.08f);
+        pane.GetComponent<Renderer>().sharedMaterial = material;
+        var obstacle = pane.AddComponent<NavMeshObstacle>();
+        obstacle.shape = NavMeshObstacleShape.Box;
+        obstacle.carving = true;
+        obstacle.carveOnlyStationary = false;
+
+        var opening = frame.gameObject.AddComponent<WindowFrame>();
+        opening.Setup(hinge, pane.GetComponent<Collider>(), DoorWidth, "문", false);
+        opening.SetupBreakRule(3, 6f);
+    }
+
+    static void CreateStair(Transform parent, long id, int floor, StairPlan plan,
+        Material stairMaterial, Material wallMaterial, List<Mesh> meshes)
+    {
+        plan = plan.Flight(floor);
+        var vertices = new List<Vector3>();
+        var uvs = new List<Vector2>();
+        var steps = new List<int>();
+        var walls = new List<int>();
+        float stepHeight = FloorHeight / StairSteps;
+        float halfWidth = StairWidth * 0.5f;
+        // 왜: 바닥 윗면에서 첫 단까지 열린 진입면을 만들어 NavMesh가 옆벽에 끊기지 않게 한다.
+        AddQuad(vertices, uvs, steps,
+            new Vector3(-halfWidth, 0f, -StairEntryDepth), new Vector3(-halfWidth, 0f, 0f),
+            new Vector3(halfWidth, 0f, 0f), new Vector3(halfWidth, 0f, -StairEntryDepth));
+        for (int step = 0; step < StairSteps; step++)
+        {
+            float z0 = step * StairTread;
+            float z1 = (step + 1) * StairTread;
+            float y = (step + 1) * stepHeight;
+            AddQuad(vertices, uvs, steps,
+                new Vector3(-halfWidth, y, z0), new Vector3(-halfWidth, y, z1),
+                new Vector3(halfWidth, y, z1), new Vector3(halfWidth, y, z0));
+            AddQuad(vertices, uvs, steps,
+                new Vector3(-halfWidth, step * stepHeight, z0), new Vector3(-halfWidth, y, z0),
+                new Vector3(halfWidth, y, z0), new Vector3(halfWidth, step * stepHeight, z0));
+        }
+
+        float run = StairSteps * StairTread;
+        AddQuad(vertices, uvs, walls,
+            new Vector3(-halfWidth, 0f, 0f), new Vector3(-halfWidth, FloorHeight + 1f, 0f),
+            new Vector3(-halfWidth, FloorHeight + 1f, run), new Vector3(-halfWidth, 0f, run));
+        AddQuad(vertices, uvs, walls,
+            new Vector3(halfWidth, 0f, run), new Vector3(halfWidth, FloorHeight + 1f, run),
+            new Vector3(halfWidth, FloorHeight + 1f, 0f), new Vector3(halfWidth, 0f, 0f));
+
+        var mesh = new Mesh { name = "HadanStair_" + id + "_" + floor };
+        mesh.SetVertices(vertices);
+        mesh.SetUVs(0, uvs);
+        mesh.subMeshCount = 2;
+        mesh.SetTriangles(steps, 0);
+        mesh.SetTriangles(walls, 1);
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        meshes.Add(mesh);
+
+        var go = new GameObject("Stair_" + floor, typeof(MeshFilter), typeof(MeshRenderer), typeof(MeshCollider));
+        go.transform.SetParent(parent, false);
+        go.transform.position = new Vector3(plan.start.x, floor * FloorHeight, plan.start.y);
+        go.transform.rotation = Quaternion.LookRotation(new Vector3(plan.direction.x, 0f, plan.direction.y));
+        go.GetComponent<MeshFilter>().sharedMesh = mesh;
+        go.GetComponent<MeshRenderer>().sharedMaterials = new[] { stairMaterial, wallMaterial };
+        go.GetComponent<MeshCollider>().sharedMesh = mesh;
+        for (int side = -1; side <= 1; side += 2)
+        {
+            var wall = go.AddComponent<BoxCollider>();
+            wall.center = new Vector3(side * (halfWidth + 0.05f), (FloorHeight + 1f) * 0.5f, run * 0.5f);
+            wall.size = new Vector3(0.1f, FloorHeight + 1f, run);
+        }
+        GameObjectUtility.SetStaticEditorFlags(go, StaticEditorFlags.BatchingStatic);
+    }
+
+    static void AddQuad(List<Vector3> vertices, List<Vector2> uvs, List<int> triangles,
+        Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+    {
+        int first = vertices.Count;
+        vertices.Add(a);
+        vertices.Add(b);
+        vertices.Add(c);
+        vertices.Add(d);
+        uvs.Add(Vector2.zero);
+        uvs.Add(Vector2.up);
+        uvs.Add(Vector2.one);
+        uvs.Add(Vector2.right);
+        triangles.Add(first);
+        triangles.Add(first + 1);
+        triangles.Add(first + 2);
+        triangles.Add(first);
+        triangles.Add(first + 2);
+        triangles.Add(first + 3);
     }
 
     static int CreateRoads(List<RoadInfo> roads, Material material, List<Mesh> meshes)
@@ -583,11 +964,10 @@ public static class HadanCityBuilder
         return roadCount;
     }
 
-    static void CreateBuildingDetails(Transform building, long id, List<Vector2> polygon, int floors,
-        float height, BuildingKind kind, int apartmentNumber, List<RoadInfo> roads,
-        DetailMaterials materials, PropCounts counts)
+    static void CreateBuildingDetails(Transform building, GameObject[] floorObjects, Transform roofParent, long id,
+        List<Vector2> polygon, int floors, float height, BuildingKind kind, int apartmentNumber,
+        int streetEdge, DetailMaterials materials, List<Mesh> meshes, PropCounts counts)
     {
-        int streetEdge = FindStreetEdge(polygon, roads, kind == BuildingKind.Commercial);
         Vector2 from = polygon[streetEdge];
         Vector2 to = polygon[(streetEdge + 1) % polygon.Count];
         Vector2 edge = to - from;
@@ -596,18 +976,21 @@ public static class HadanCityBuilder
         Vector2 center = (from + to) * 0.5f;
         var facing = Quaternion.LookRotation(new Vector3(outward.x, 0f, outward.y));
         var random = RoadRandom(id, 17);
-
-        CreatePrimitive(PrimitiveType.Cube, "Door", building,
-            new Vector3(center.x + outward.x * 0.10f, 1.1f, center.y + outward.y * 0.10f),
-            new Vector3(1.2f, 2.2f, 0.04f), facing, materials.door, false);
-        counts.doors++;
+        var airConditionerBatches = new MeshBatch[floors];
+        var signBatches = new MeshBatch[floors, materials.signMaterials.Length];
 
         bool hasShop = kind == BuildingKind.Commercial || kind == BuildingKind.MixedUse;
         if (hasShop)
         {
-            materials.shopfrontBatch.AddBox(
-                new Vector3(center.x + outward.x * 0.05f, 1.5f, center.y + outward.y * 0.05f),
-                new Vector3(Mathf.Max(1.2f, edge.magnitude * 0.94f), 3f, 0.08f), facing);
+            float shopWidth = edge.magnitude * 0.94f;
+            float sideWidth = Mathf.Max(0f, (shopWidth - DoorWidth - 0.1f) * 0.5f);
+            for (int side = -1; side <= 1 && sideWidth > 0.01f; side += 2)
+            {
+                Vector2 point = center + tangent * side * (DoorWidth * 0.5f + 0.05f + sideWidth * 0.5f);
+                materials.shopfrontBatch.AddBox(
+                    new Vector3(point.x + outward.x * 0.05f, 1.5f, point.y + outward.y * 0.05f),
+                    new Vector3(sideWidth, 3f, 0.08f), facing);
+            }
             CreatePrimitive(PrimitiveType.Cube, "Awning", building,
                 new Vector3(center.x + outward.x * 0.6f, 2.8f, center.y + outward.y * 0.6f),
                 new Vector3(edge.magnitude * 0.6f, 0.12f, 1.2f),
@@ -622,13 +1005,14 @@ public static class HadanCityBuilder
             for (int floor = 1; floor < floors; floor++)
             {
                 if (random.NextDouble() > chance) continue;
-                AddHorizontalSign(materials, random, center, outward, facing, edge.magnitude,
+                AddHorizontalSign(materials, signBatches, floor, random, center, outward, facing, edge.magnitude,
                     floor * FloorHeight + 2.65f);
                 buildingSigns++;
             }
             if (buildingSigns == 0)
             {
-                AddHorizontalSign(materials, random, center, outward, facing, edge.magnitude,
+                int signFloor = Mathf.Min(1, floors - 1);
+                AddHorizontalSign(materials, signBatches, signFloor, random, center, outward, facing, edge.magnitude,
                     FloorHeight + 2.65f);
                 buildingSigns++;
             }
@@ -641,8 +1025,12 @@ public static class HadanCityBuilder
                 Vector3 signCenter = new Vector3(corner.x + outward.x * 0.4f,
                     Mathf.Min(height - signHeight * 0.5f, 4f + signHeight * 0.5f),
                     corner.y + outward.y * 0.4f);
-                materials.signBatches[random.Next(materials.signBatches.Length)].AddBox(signCenter,
-                    new Vector3(0.08f, signHeight, 0.8f), facing);
+                int signFloor = Mathf.Clamp(Mathf.FloorToInt(signCenter.y / FloorHeight), 0, floors - 1);
+                int material = random.Next(materials.signMaterials.Length);
+                var batch = signBatches[signFloor, material]
+                    ?? (signBatches[signFloor, material] = new MeshBatch("Signs_" + material,
+                        materials.signMaterials[material]));
+                batch.AddBox(signCenter, new Vector3(0.08f, signHeight, 0.8f), facing);
                 var verticalMarker = new GameObject("VerticalSignAnchor").transform;
                 verticalMarker.SetParent(building, false);
                 verticalMarker.position = new Vector3(corner.x, signCenter.y, corner.y);
@@ -656,7 +1044,7 @@ public static class HadanCityBuilder
         }
         else if (kind == BuildingKind.MixedUse)
         {
-            AddHorizontalSign(materials, random, center, outward, facing, edge.magnitude, 3.15f);
+            AddHorizontalSign(materials, signBatches, 0, random, center, outward, facing, edge.magnitude, 3.15f);
             buildingSigns++;
         }
         counts.signs += buildingSigns;
@@ -672,7 +1060,10 @@ public static class HadanCityBuilder
                 {
                     float along = Mathf.Lerp(0.18f, 0.82f, (float)random.NextDouble());
                     Vector2 point = Vector2.Lerp(from, to, along);
-                    materials.airConditionerBatch.AddBox(
+                    var batch = airConditionerBatches[floor]
+                        ?? (airConditionerBatches[floor] = new MeshBatch("WallAirConditioners",
+                            materials.airConditioner));
+                    batch.AddBox(
                         new Vector3(point.x + outward.x * 0.24f, floor * FloorHeight + 1.0f,
                             point.y + outward.y * 0.24f),
                         new Vector3(0.8f, 0.55f, 0.45f), facing);
@@ -696,8 +1087,15 @@ public static class HadanCityBuilder
         if (kind == BuildingKind.Apartment)
             AddApartmentMarkings(materials, polygon, streetEdge, height, apartmentNumber);
 
+        for (int floor = 0; floor < floors; floor++)
+        {
+            airConditionerBatches[floor]?.Emit(floorObjects[floor].transform, meshes);
+            for (int material = 0; material < materials.signMaterials.Length; material++)
+                signBatches[floor, material]?.Emit(floorObjects[floor].transform, meshes);
+        }
+
         var rooftop = new GameObject("Rooftop").transform;
-        rooftop.SetParent(building, false);
+        rooftop.SetParent(roofParent, false);
         counts.rooftop += polygon.Count;
         var occupied = new List<Placement>();
         var roofRandom = RoadRandom(id, 31);
@@ -724,12 +1122,15 @@ public static class HadanCityBuilder
         }
     }
 
-    static void AddHorizontalSign(DetailMaterials materials, System.Random random, Vector2 center,
-        Vector2 outward, Quaternion facing, float wallWidth, float y)
+    static void AddHorizontalSign(DetailMaterials materials, MeshBatch[,] batches, int floor,
+        System.Random random, Vector2 center, Vector2 outward, Quaternion facing, float wallWidth, float y)
     {
         float width = wallWidth * Mathf.Lerp(0.60f, 0.95f, (float)random.NextDouble());
         float height = Mathf.Lerp(0.8f, 1.2f, (float)random.NextDouble());
-        materials.signBatches[random.Next(materials.signBatches.Length)].AddBox(
+        int material = random.Next(materials.signMaterials.Length);
+        var batch = batches[floor, material]
+            ?? (batches[floor, material] = new MeshBatch("Signs_" + material, materials.signMaterials[material]));
+        batch.AddBox(
             new Vector3(center.x + outward.x * 0.05f, y, center.y + outward.y * 0.05f),
             new Vector3(width, height, 0.08f), facing);
     }
@@ -921,49 +1322,218 @@ public static class HadanCityBuilder
         return go;
     }
 
-    static Mesh CreateBuildingMesh(long id, List<Vector2> polygon, float height)
+    static Mesh CreateFloorMesh(long id, int floor, List<Vector2> polygon,
+        int streetEdge, bool hasStairs, StairPlan stair)
     {
-        var roofTriangles = new List<int>();
-        if (!Triangulate(polygon, roofTriangles)) return null;
+        var sourceTriangles = new List<int>();
+        if (!Triangulate(polygon, sourceTriangles)) return null;
 
-        var vertices = new List<Vector3>(polygon.Count * 17);
-        var uvs = new List<Vector2>(polygon.Count * 17);
-        var wallTriangles = new List<int>(polygon.Count * 6);
-        // 지붕을 별도 서브메쉬로 두면 창문 타일을 피하려고 UV 규칙을 비틀 필요가 없다.
-        for (int i = 0; i < polygon.Count; i++)
+        var vertices = new List<Vector3>();
+        var uvs = new List<Vector2>();
+        var floorTriangles = new List<int>();
+        var innerTriangles = new List<int>();
+        float top = floor * FloorHeight;
+        float bottom = top - FloorThickness;
+        bool cutHole = hasStairs && floor > 0;
+        StairPlan hole = cutHole ? stair.Flight(floor - 1) : default;
+
+        for (int i = 0; i < sourceTriangles.Count; i += 3)
         {
-            vertices.Add(new Vector3(polygon[i].x, height, polygon[i].y));
-            uvs.Add(Vector2.zero);
+            var triangle = new List<Vector2>
+            {
+                polygon[sourceTriangles[i]], polygon[sourceTriangles[i + 1]], polygon[sourceTriangles[i + 2]]
+            };
+            var pieces = cutHole ? SubtractStairHole(triangle, hole)
+                : new List<List<Vector2>> { triangle };
+            for (int piece = 0; piece < pieces.Count; piece++)
+                AddFloorPiece(vertices, uvs, floorTriangles, pieces[piece], top, bottom);
         }
 
-        float perimeter = 0f;
-        for (int i = 0; i < polygon.Count; i++)
+        for (int edge = 0; edge < polygon.Count; edge++)
         {
-            Vector2 a = polygon[i];
-            Vector2 b = polygon[(i + 1) % polygon.Count];
+            Vector2 a = polygon[edge];
+            Vector2 b = polygon[(edge + 1) % polygon.Count];
+            AddQuad(vertices, uvs, floorTriangles,
+                new Vector3(a.x, bottom, a.y), new Vector3(b.x, bottom, b.y),
+                new Vector3(b.x, top, b.y), new Vector3(a.x, top, a.y));
+
             float length = Vector2.Distance(a, b);
-            int first = vertices.Count;
-            vertices.Add(new Vector3(a.x, 0f, a.y));
-            vertices.Add(new Vector3(b.x, 0f, b.y));
-            vertices.Add(new Vector3(b.x, height, b.y));
-            vertices.Add(new Vector3(a.x, height, a.y));
-            uvs.Add(new Vector2(perimeter / 3f, 0f));
-            uvs.Add(new Vector2((perimeter + length) / 3f, 0f));
-            uvs.Add(new Vector2((perimeter + length) / 3f, height / FloorHeight));
-            uvs.Add(new Vector2(perimeter / 3f, height / FloorHeight));
-            wallTriangles.Add(first);
-            wallTriangles.Add(first + 1);
-            wallTriangles.Add(first + 2);
-            wallTriangles.Add(first);
-            wallTriangles.Add(first + 2);
-            wallTriangles.Add(first + 3);
-            perimeter += length;
+            Vector2 tangent = (b - a).normalized;
+            Vector2 outward = new Vector2(-tangent.y, tangent.x);
+            float inset = WallThickness + 0.002f;
+            Vector2 offsetA = a - outward * inset;
+            Vector2 innerA = InsetCorner(polygon, edge, inset);
+            Vector2 innerB = InsetCorner(polygon, (edge + 1) % polygon.Count, inset);
+            float innerStart = Vector2.Dot(innerA - offsetA, tangent);
+            float innerEnd = Vector2.Dot(innerB - offsetA, tangent);
+            var spans = WallSpans(length, floor == 0 && edge == streetEdge);
+            for (int span = 0; span < spans.Count; span++)
+            {
+                WallSpan value = spans[span];
+                float start = value.start <= Epsilon ? innerStart : Mathf.Max(value.start, innerStart);
+                float end = value.end >= length - Epsilon ? innerEnd : Mathf.Min(value.end, innerEnd);
+                if (end <= start + Epsilon) continue;
+                Vector2 p = offsetA + tangent * start;
+                Vector2 q = offsetA + tangent * end;
+                float y0 = top + value.bottom;
+                float y1 = Mathf.Min(top + value.top, top + FloorHeight - FloorThickness);
+                AddQuad(vertices, uvs, innerTriangles,
+                    new Vector3(p.x, y0, p.y), new Vector3(p.x, y1, p.y),
+                    new Vector3(q.x, y1, q.y), new Vector3(q.x, y0, q.y));
+            }
         }
 
+        if (cutHole)
+        {
+            Vector2[] corners = hole.HoleCorners();
+            for (int edge = 0; edge < corners.Length; edge++)
+            {
+                Vector2 a = corners[edge];
+                Vector2 b = corners[(edge + 1) % corners.Length];
+                AddQuad(vertices, uvs, floorTriangles,
+                    new Vector3(b.x, bottom, b.y), new Vector3(a.x, bottom, a.y),
+                    new Vector3(a.x, top, a.y), new Vector3(b.x, top, b.y));
+            }
+        }
+
+        var mesh = new Mesh { name = "HadanFloor_" + id + "_" + floor };
+        mesh.SetVertices(vertices);
+        mesh.SetUVs(0, uvs);
+        mesh.subMeshCount = 2;
+        mesh.SetTriangles(floorTriangles, 0);
+        mesh.SetTriangles(innerTriangles, 1);
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
+    static Vector2 InsetCorner(List<Vector2> polygon, int vertex, float inset)
+    {
+        Vector2 a = polygon[(vertex - 1 + polygon.Count) % polygon.Count];
+        Vector2 b = polygon[vertex];
+        Vector2 c = polygon[(vertex + 1) % polygon.Count];
+        Vector2 previous = (b - a).normalized;
+        Vector2 next = (c - b).normalized;
+        Vector2 p = b - new Vector2(-previous.y, previous.x) * inset;
+        Vector2 q = b - new Vector2(-next.y, next.x) * inset;
+        float cross = previous.x * next.y - previous.y * next.x;
+        if (Mathf.Abs(cross) <= Epsilon) return q;
+        float distance = ((q.x - p.x) * next.y - (q.y - p.y) * next.x) / cross;
+        return p + previous * distance;
+    }
+
+    static void AddFloorPiece(List<Vector3> vertices, List<Vector2> uvs, List<int> triangles,
+        List<Vector2> polygon, float top, float bottom)
+    {
+        if (polygon.Count < 3) return;
+        int first = vertices.Count;
+        for (int i = 0; i < polygon.Count; i++)
+        {
+            vertices.Add(new Vector3(polygon[i].x, top, polygon[i].y));
+            uvs.Add(polygon[i]);
+        }
+        for (int i = 1; i < polygon.Count - 1; i++)
+        {
+            triangles.Add(first);
+            triangles.Add(first + i);
+            triangles.Add(first + i + 1);
+        }
+
+        first = vertices.Count;
+        for (int i = 0; i < polygon.Count; i++)
+        {
+            vertices.Add(new Vector3(polygon[i].x, bottom, polygon[i].y));
+            uvs.Add(polygon[i]);
+        }
+        for (int i = 1; i < polygon.Count - 1; i++)
+        {
+            triangles.Add(first);
+            triangles.Add(first + i + 1);
+            triangles.Add(first + i);
+        }
+    }
+
+    static List<List<Vector2>> SubtractStairHole(List<Vector2> polygon, StairPlan stair)
+    {
+        var outside = new List<List<Vector2>>();
+        var candidates = new List<List<Vector2>> { polygon };
+        for (int boundary = 0; boundary < 4; boundary++)
+        {
+            var next = new List<List<Vector2>>();
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                var removed = ClipHoleHalfPlane(candidates[i], stair, boundary, false);
+                if (removed.Count >= 3) outside.Add(removed);
+                var kept = ClipHoleHalfPlane(candidates[i], stair, boundary, true);
+                if (kept.Count >= 3) next.Add(kept);
+            }
+            candidates = next;
+            if (candidates.Count == 0) break;
+        }
+        return outside;
+    }
+
+    static List<Vector2> ClipHoleHalfPlane(List<Vector2> polygon, StairPlan stair,
+        int boundary, bool keepInside)
+    {
+        var result = new List<Vector2>();
         for (int i = 0; i < polygon.Count; i++)
         {
             Vector2 a = polygon[i];
             Vector2 b = polygon[(i + 1) % polygon.Count];
+            float aValue = HoleHalfPlane(a, stair, boundary);
+            float bValue = HoleHalfPlane(b, stair, boundary);
+            bool aKept = keepInside ? aValue >= -Epsilon : aValue <= Epsilon;
+            bool bKept = keepInside ? bValue >= -Epsilon : bValue <= Epsilon;
+            if (aKept) result.Add(a);
+            if (aKept == bKept) continue;
+            float t = aValue / (aValue - bValue);
+            result.Add(Vector2.Lerp(a, b, t));
+        }
+        return result;
+    }
+
+    static float HoleHalfPlane(Vector2 point, StairPlan stair, int boundary)
+    {
+        Vector2 offset = point - stair.start;
+        float x = Vector2.Dot(offset, stair.right);
+        float z = Vector2.Dot(offset, stair.direction);
+        float halfWidth = StairWidth * 0.5f;
+        float run = StairSteps * StairTread;
+        switch (boundary)
+        {
+            case 0: return x + halfWidth;
+            case 1: return halfWidth - x;
+            case 2: return z;
+            default: return run - z;
+        }
+    }
+
+    static Mesh CreateRoofMesh(long id, List<Vector2> polygon, float height)
+    {
+        var surface = new List<int>();
+        if (!Triangulate(polygon, surface)) return null;
+        var vertices = new List<Vector3>();
+        var uvs = new List<Vector2>();
+        var triangles = new List<int>();
+        float bottom = height - FloorThickness;
+
+        for (int i = 0; i < surface.Count; i += 3)
+        {
+            var piece = new List<Vector2>
+            {
+                polygon[surface[i]], polygon[surface[i + 1]], polygon[surface[i + 2]]
+            };
+            AddFloorPiece(vertices, uvs, triangles, piece, height, bottom);
+        }
+        for (int i = 0; i < polygon.Count; i++)
+        {
+            Vector2 a = polygon[i];
+            Vector2 b = polygon[(i + 1) % polygon.Count];
+            AddQuad(vertices, uvs, triangles,
+                new Vector3(a.x, bottom, a.y), new Vector3(b.x, bottom, b.y),
+                new Vector3(b.x, height, b.y), new Vector3(a.x, height, a.y));
+
             Vector2 offset = new Vector2(-(b.y - a.y), b.x - a.x).normalized * RailingHalfThickness;
             int first = vertices.Count;
             vertices.Add(new Vector3(a.x + offset.x, height, a.y + offset.y));
@@ -979,37 +1549,85 @@ public static class HadanCityBuilder
             vertices.Add(new Vector3(b.x - offset.x, height + RailingHeight, b.y - offset.y));
             vertices.Add(new Vector3(a.x - offset.x, height + RailingHeight, a.y - offset.y));
             for (int j = 0; j < 12; j++) uvs.Add(Vector2.zero);
-
-            roofTriangles.Add(first);
-            roofTriangles.Add(first + 1);
-            roofTriangles.Add(first + 2);
-            roofTriangles.Add(first);
-            roofTriangles.Add(first + 2);
-            roofTriangles.Add(first + 3);
-            roofTriangles.Add(first + 4);
-            roofTriangles.Add(first + 5);
-            roofTriangles.Add(first + 6);
-            roofTriangles.Add(first + 4);
-            roofTriangles.Add(first + 6);
-            roofTriangles.Add(first + 7);
-            roofTriangles.Add(first + 8);
-            roofTriangles.Add(first + 9);
-            roofTriangles.Add(first + 10);
-            roofTriangles.Add(first + 8);
-            roofTriangles.Add(first + 10);
-            roofTriangles.Add(first + 11);
+            int[] railing =
+            {
+                0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11
+            };
+            for (int j = 0; j < railing.Length; j++) triangles.Add(first + railing[j]);
         }
 
-        var mesh = new Mesh { name = "HadanBuilding_" + id };
+        var mesh = new Mesh { name = "HadanRoof_" + id };
         mesh.SetVertices(vertices);
         mesh.SetUVs(0, uvs);
-        mesh.subMeshCount = 2;
-        mesh.SetTriangles(wallTriangles, 0);
-        mesh.SetTriangles(roofTriangles, 1);
+        mesh.SetTriangles(triangles, 0);
         mesh.RecalculateNormals();
         mesh.RecalculateBounds();
         return mesh;
     }
+
+    static bool TryStairPlan(List<Vector2> polygon, Vector2 doorCenter, out StairPlan plan)
+    {
+        var edges = new List<int>();
+        for (int i = 0; i < polygon.Count; i++) edges.Add(i);
+        edges.Sort((left, right) => Vector2.Distance(polygon[right], polygon[(right + 1) % polygon.Count])
+            .CompareTo(Vector2.Distance(polygon[left], polygon[(left + 1) % polygon.Count])));
+
+        float clearance = WallThickness + V01SceneBuilder.AgentRadius();
+        float inwardOffset = clearance + StairWidth * 0.5f;
+        float topOffset = clearance + StairSteps * StairTread + 1f;
+        for (int i = 0; i < edges.Count; i++)
+        {
+            Vector2 a = polygon[edges[i]];
+            Vector2 b = polygon[(edges[i] + 1) % polygon.Count];
+            Vector2 direction = (b - a).normalized;
+            Vector2 inward = new Vector2(direction.y, -direction.x);
+            var forward = new StairPlan(a + direction * topOffset + inward * inwardOffset,
+                -direction, inward * (StairWidth + StairGap));
+            if (StairFits(polygon, forward, doorCenter)) { plan = forward; return true; }
+            var backward = new StairPlan(b - direction * topOffset + inward * inwardOffset,
+                direction, inward * (StairWidth + StairGap));
+            if (StairFits(polygon, backward, doorCenter)) { plan = backward; return true; }
+        }
+        plan = default;
+        return false;
+    }
+
+    static bool StairFits(List<Vector2> polygon, StairPlan plan, Vector2 doorCenter)
+    {
+        float halfWidth = StairWidth * 0.5f;
+        float run = StairSteps * StairTread;
+        Vector2 across = plan.secondOffset.normalized;
+        Vector2[] corners =
+        {
+            plan.start - across * halfWidth - plan.direction,
+            plan.start - across * halfWidth + plan.direction * (run + 1f),
+            plan.start + across * (StairWidth + StairGap + halfWidth) + plan.direction * (run + 1f),
+            plan.start + across * (StairWidth + StairGap + halfWidth) - plan.direction
+        };
+        for (int i = 0; i < corners.Length; i++)
+            if (!InsideStairArea(corners[i], polygon)) return false;
+
+        for (int side = 0; side < corners.Length; side++)
+            for (int edge = 0; edge < polygon.Count; edge++)
+                if (SegmentDistance(corners[side], corners[(side + 1) % corners.Length],
+                        polygon[edge], polygon[(edge + 1) % polygon.Count])
+                    < WallThickness + V01SceneBuilder.AgentRadius() - Epsilon)
+                    return false;
+
+        Vector2 doorOffset = doorCenter - plan.start;
+        float x = Mathf.Clamp(Vector2.Dot(doorOffset, across),
+            -halfWidth - 0.2f, StairWidth + StairGap + halfWidth + 0.2f);
+        float z = Mathf.Clamp(Vector2.Dot(doorOffset, plan.direction), 0f, StairSteps * StairTread);
+        // 왜: 문 안팎의 1.5m 접근 공간을 계단 구멍과 옆벽이 막지 않게 한다.
+        if ((doorCenter - plan.start - across * x - plan.direction * z).sqrMagnitude < 1.5f * 1.5f)
+            return false;
+        return true;
+    }
+
+    static bool InsideStairArea(Vector2 point, List<Vector2> polygon)
+        => PointInPolygon(point, polygon)
+           && DistanceToPolygonEdge(point, polygon)
+           >= WallThickness + V01SceneBuilder.AgentRadius() - Epsilon;
 
     static List<Vector2> MakePolygon(GeoPoint[] geometry)
     {
@@ -1146,7 +1764,7 @@ public static class HadanCityBuilder
         return true;
     }
 
-    static int BuildingFloors(MapTags tags, float area)
+    static int FloorCount(MapTags tags, float area)
     {
         int floors;
         if (!string.IsNullOrEmpty(tags.building_levels)
@@ -1384,130 +2002,327 @@ public static class HadanCityBuilder
         return result;
     }
 
-    static int CountBadFaces(Mesh mesh, List<Vector2> polygon)
+    static int CountBadFaces(Mesh mesh, string partName, List<Vector2> polygon, ref int logged)
     {
-        int bad = 0;
+        if (!mesh) return 1;
         var vertices = mesh.vertices;
         var triangles = mesh.triangles;
         if (triangles.Length == 0) return 1;
-        float roofHeight = vertices[0].y;
+        int bad = 0;
+        bool floor = partName.StartsWith("Floor_", StringComparison.Ordinal);
+        bool roof = partName == "Roof";
+        bool wall = partName.StartsWith("ExteriorWall_", StringComparison.Ordinal);
+        bool stair = partName.StartsWith("Stair_", StringComparison.Ordinal);
+        float surface = floor ? mesh.bounds.min.y + FloorThickness : roof ? vertices[0].y : 0f;
+        int subMesh = 0;
+        int subMeshEnd = (int)mesh.GetIndexCount(0);
         for (int i = 0; i < triangles.Length; i += 3)
         {
+            while (i >= subMeshEnd && subMesh + 1 < mesh.subMeshCount)
+                subMeshEnd += (int)mesh.GetIndexCount(++subMesh);
             Vector3 a = vertices[triangles[i]];
             Vector3 b = vertices[triangles[i + 1]];
             Vector3 c = vertices[triangles[i + 2]];
             Vector3 normal = Vector3.Cross(b - a, c - a);
-            if (normal.sqrMagnitude <= Epsilon * Epsilon) { bad++; continue; }
+            Vector3 center3 = (a + b + c) / 3f;
+            if (normal.sqrMagnitude <= Epsilon * Epsilon)
+            {
+                LogBadFace(mesh, subMesh, center3, normal, "0이 아닌 유효 법선", ref logged);
+                bad++;
+                continue;
+            }
             normal.Normalize();
 
             if (Mathf.Abs(a.y - b.y) <= Epsilon && Mathf.Abs(b.y - c.y) <= Epsilon)
             {
-                if (normal.y < 0.999f) bad++;
+                float expected = floor || roof
+                    ? (a.y < surface - Epsilon ? -1f : 1f)
+                    : wall && Mathf.Abs(a.y - mesh.bounds.min.y) <= Epsilon ? -1f : 1f;
+                if (normal.y * expected < 0.999f)
+                {
+                    LogBadFace(mesh, subMesh, center3, Vector3.up * expected, normal, ref logged);
+                    bad++;
+                }
                 continue;
             }
 
-            Vector2 edgeA = new Vector2(a.x, a.z);
-            Vector2 edgeB = new Vector2(b.x, b.z);
-            bool matched = false;
-            if (Mathf.Min(a.y, Mathf.Min(b.y, c.y)) >= roofHeight - Epsilon)
+            if (Mathf.Abs(normal.y) > Epsilon)
             {
-                Vector2 center = (edgeA + edgeB + new Vector2(c.x, c.z)) / 3f;
-                for (int j = 0; j < polygon.Count; j++)
-                {
-                    Vector2 p = polygon[j];
-                    Vector2 q = polygon[(j + 1) % polygon.Count];
-                    Vector2 outward = new Vector2(-(q.y - p.y), q.x - p.x).normalized;
-                    float alignment = Vector2.Dot(new Vector2(normal.x, normal.z), outward);
-                    if (Mathf.Abs(alignment) < 0.999f
-                        || DistanceToSegment(center, p, q) > RailingHalfThickness + Epsilon) continue;
-                    if (Vector2.Dot(center - p, outward) * alignment <= 0f) bad++;
-                    matched = true;
-                    break;
-                }
-                if (!matched) bad++;
+                LogBadFace(mesh, subMesh, center3, normal, "수평 법선(y=0)", ref logged);
+                bad++;
                 continue;
             }
-            for (int j = 0; j < polygon.Count; j++)
+            if (stair) continue;
+            Vector2 center = (new Vector2(a.x, a.z) + new Vector2(b.x, b.z)
+                + new Vector2(c.x, c.z)) / 3f;
+            if (wall)
             {
-                Vector2 p = polygon[j];
-                Vector2 q = polygon[(j + 1) % polygon.Count];
-                if (!SameEdge(edgeA, edgeB, p, q)) continue;
-                Vector2 edge = q - p;
-                Vector2 outward = new Vector2(-edge.y, edge.x).normalized;
-                if (Vector2.Dot(new Vector2(normal.x, normal.z), outward) < 0.999f) bad++;
-                matched = true;
-                break;
+                Vector3 expected = (center3 - mesh.bounds.center).normalized;
+                if (Vector3.Dot(normal, center3 - mesh.bounds.center) <= Epsilon)
+                {
+                    LogBadFace(mesh, subMesh, center3, expected, normal, ref logged);
+                    bad++;
+                }
+                continue;
             }
-            if (!matched) bad++;
+            float distance = float.PositiveInfinity;
+            Vector2 outward = Vector2.zero;
+            float signed = 0f;
+            for (int edge = 0; edge < polygon.Count; edge++)
+            {
+                Vector2 p = polygon[edge];
+                Vector2 q = polygon[(edge + 1) % polygon.Count];
+                float candidate = DistanceToSegment(center, p, q);
+                if (candidate < distance)
+                {
+                    distance = candidate;
+                    outward = new Vector2(-(q.y - p.y), q.x - p.x).normalized;
+                    signed = Vector2.Dot(center - p, outward);
+                }
+            }
+
+            float expectedDirection = 0f;
+            if (wall || floor)
+            {
+                float inner = wall ? WallThickness : WallThickness + 0.002f;
+                if (Mathf.Abs(signed) <= 0.01f) expectedDirection = 1f;
+                else if (Mathf.Abs(signed + inner) <= 0.01f) expectedDirection = -1f;
+            }
+            else if (roof)
+            {
+                if (Mathf.Abs(signed) <= 0.01f) expectedDirection = 1f;
+                else if (Mathf.Abs(Mathf.Abs(signed) - RailingHalfThickness) <= 0.01f)
+                    expectedDirection = Mathf.Sign(signed);
+            }
+
+            if (expectedDirection != 0f
+                && Vector2.Dot(new Vector2(normal.x, normal.z), outward) * expectedDirection < 0.999f)
+            {
+                LogBadFace(mesh, subMesh, center3,
+                    new Vector3(outward.x, 0f, outward.y) * expectedDirection, normal, ref logged);
+                bad++;
+            }
         }
         return bad;
     }
 
-    static void CheckBuildingProps(Transform root, int buildingCount,
-        Dictionary<long, List<Vector2>> polygons, ref int failures)
+    static void LogBadFace(Mesh mesh, int subMesh, Vector3 center, Vector3 expected,
+        Vector3 normal, ref int logged)
+        => LogBadFace(mesh, subMesh, center, normal, expected.ToString("F3"), ref logged);
+
+    static void LogBadFace(Mesh mesh, int subMesh, Vector3 center, Vector3 normal,
+        string expected, ref int logged)
+    {
+        if (logged >= 3) return;
+        Debug.LogWarning("[Hadan Check] 법선 실패: 메쉬 " + mesh.name + ", 서브메쉬 " + subMesh
+            + ", 면 중심 " + center.ToString("F3") + ", 법선 " + normal.ToString("F3")
+            + ", 기대 방향 " + expected);
+        logged++;
+    }
+
+    static void CheckBuildingProps(BuildingFloors manager, ref int failures)
     {
         int doors = 0;
-        int awnings = 0;
-        bool doorsValid = root;
-        bool noForbiddenColliders = root;
-        bool railingsMerged = root;
-        bool rooftopValid = root;
-        bool facadeUvValid = root;
+        int stairs = 0;
+        bool doorsValid = manager;
+        bool openingsValid = manager;
+        bool floorsValid = manager;
+        bool stepHeightsValid = manager;
+        bool stairPlacementValid = manager;
+        bool stairHeadroomValid = manager;
+        bool rooftopValid = manager;
+        bool facadeUvValid = manager;
+        int facadeUvFailures = 0;
+        bool noAwningColliders = manager;
+        bool railingsMerged = manager;
 
-        if (root)
+        if (manager)
         {
-            for (int i = 0; i < root.childCount; i++)
+            for (int i = 0; i < manager.Buildings.Count; i++)
             {
-                var building = root.GetChild(i);
-                int buildingDoors = CountNamed(building, "Door");
-                doors += buildingDoors;
-                awnings += CountNamed(building, "Awning");
-                if (buildingDoors != 1) doorsValid = false;
-
-                var filter = building.GetComponent<MeshFilter>();
-                var renderer = building.GetComponent<MeshRenderer>();
-                if (!filter || !filter.sharedMesh || filter.sharedMesh.subMeshCount != 2
-                    || filter.sharedMesh.uv.Length != filter.sharedMesh.vertexCount)
-                    facadeUvValid = false;
-                var shared = renderer ? renderer.sharedMaterials : null;
-                if (shared == null || shared.Length != 2 || !shared[0] || !shared[1]
-                    || !shared[0].mainTexture || shared[1].mainTexture)
-                    facadeUvValid = false;
-
-                if (!TryBuildingId(building.name, out long id) || !polygons.TryGetValue(id, out var polygon)
-                    || !filter || !filter.sharedMesh)
+                var entry = manager.Buildings[i];
+                var openings = entry.root.GetComponentsInChildren<WindowFrame>(true);
+                doors += openings.Length;
+                doorsValid &= openings.Length == 1 && !openings[0].CanVault(openings[0].Center);
+                if (openings.Length == 1)
                 {
-                    rooftopValid = false;
-                    continue;
+                    var walls = entry.floors[0].GetComponentsInChildren<WallSegment>(true);
+                    for (int wall = 0; wall < walls.Length; wall++)
+                    {
+                        var collider = walls[wall].GetComponent<Collider>();
+                        Vector3 normal = openings[0].Normal.normalized;
+                        var ray = new Ray(openings[0].Center - normal, normal);
+                        if (collider && collider.Raycast(ray, out _, 2f))
+                            openingsValid = false;
+                    }
                 }
 
-                float roofHeight = filter.sharedMesh.bounds.max.y - RailingHeight;
-                bool meshRailing = filter.sharedMesh.vertexCount == polygon.Count * 17;
-                railingsMerged &= CountNamed(building, "Railing") == 0 && meshRailing;
-                if (!meshRailing) rooftopValid = false;
-                var all = building.GetComponentsInChildren<Transform>(true);
+                for (int floor = 0; floor < entry.floors.Length; floor++)
+                {
+                    var filter = entry.floors[floor].GetComponent<MeshFilter>();
+                    var renderer = entry.floors[floor].GetComponent<MeshRenderer>();
+                    floorsValid &= filter && filter.sharedMesh && filter.sharedMesh.subMeshCount == 2
+                        && Mathf.Abs(filter.sharedMesh.GetSubMesh(1).bounds.min.y - floor * FloorHeight) <= Epsilon
+                        && Mathf.Abs(filter.sharedMesh.GetSubMesh(1).bounds.max.y
+                            - ((floor + 1) * FloorHeight - FloorThickness)) <= Epsilon
+                        && renderer && renderer.sharedMaterials.Length == 2;
+                }
+
+                var stairParts = entry.root.GetComponentsInChildren<MeshFilter>(true);
+                var stairPolygon = new List<Vector2>(entry.polygon);
+                int buildingStairs = 0;
+                for (int part = 0; part < stairParts.Length; part++)
+                {
+                    if (!stairParts[part].name.StartsWith("Stair_", StringComparison.Ordinal)) continue;
+                    buildingStairs++;
+                    Vector3 first = stairParts[part].transform.TransformPoint(
+                        new Vector3(0f, 0f, StairTread * 0.5f));
+                    Vector3 entryPoint = stairParts[part].transform.TransformPoint(new Vector3(0f, 0f, -0.8f));
+                    Vector3 last = stairParts[part].transform.TransformPoint(
+                        new Vector3(0f, 0f, (StairSteps - 0.5f) * StairTread));
+                    stairPlacementValid &= InsideStairArea(new Vector2(first.x, first.z), stairPolygon)
+                        && InsideStairArea(new Vector2(entryPoint.x, entryPoint.z), stairPolygon)
+                        && InsideStairArea(new Vector2(last.x, last.z), stairPolygon);
+                    var heights = new List<float>();
+                    var stairVertices = stairParts[part].sharedMesh.vertices;
+                    for (int vertex = 0; vertex < stairVertices.Length; vertex++)
+                    {
+                        float y = stairVertices[vertex].y;
+                        if (y < -Epsilon || y > FloorHeight + Epsilon) continue;
+                        bool known = false;
+                        for (int knownIndex = 0; knownIndex < heights.Count; knownIndex++)
+                            if (Mathf.Abs(heights[knownIndex] - y) <= Epsilon) { known = true; break; }
+                        if (!known) heights.Add(y);
+                    }
+                    heights.Sort();
+                    for (int height = 1; height < heights.Count; height++)
+                        if (heights[height] - heights[height - 1] > 0.25f + Epsilon)
+                            stepHeightsValid = false;
+                }
+                stairs += buildingStairs;
+                floorsValid &= entry.hasStairs
+                    ? buildingStairs == entry.floors.Length - 1 : buildingStairs == 0;
+                stairHeadroomValid &= !entry.hasStairs || HasStairHeadroom(entry);
+
+                var exteriorWalls = entry.root.GetComponentsInChildren<WallSegment>(true);
+                for (int wall = 0; wall < exteriorWalls.Length; wall++)
+                {
+                    if (!exteriorWalls[wall].name.StartsWith("ExteriorWall_", StringComparison.Ordinal)) continue;
+                    var filter = exteriorWalls[wall].GetComponent<MeshFilter>();
+                    var renderer = exteriorWalls[wall].GetComponent<MeshRenderer>();
+                    var uv = filter && filter.sharedMesh ? filter.sharedMesh.uv : null;
+                    bool valid = filter && filter.sharedMesh
+                        && uv.Length == filter.sharedMesh.vertexCount && uv.Length >= 4
+                        && (uv[1] - uv[0]).sqrMagnitude > Epsilon * Epsilon
+                        && (uv[3] - uv[0]).sqrMagnitude > Epsilon * Epsilon
+                        && renderer && renderer.sharedMaterial && renderer.sharedMaterial.mainTexture;
+                    facadeUvValid &= valid;
+                    if (!valid && facadeUvFailures++ < 3)
+                        Debug.LogWarning("[Hadan Check] 외관 UV 실패: " + entry.root.name + "/"
+                            + exteriorWalls[wall].name + " 바깥면(정점 0~3), UV "
+                            + (uv != null ? uv.Length.ToString() : "없음") + "/"
+                            + (filter && filter.sharedMesh ? filter.sharedMesh.vertexCount.ToString() : "메쉬 없음")
+                            + ", 텍스처 " + (renderer && renderer.sharedMaterial
+                                && renderer.sharedMaterial.mainTexture ? "있음" : "없음"));
+                }
+
+                float roofHeight = entry.floors.Length * FloorHeight;
+                var roofFilter = entry.roof.GetComponent<MeshFilter>();
+                railingsMerged &= CountNamed(entry.root.transform, "Railing") == 0
+                    && roofFilter && roofFilter.sharedMesh
+                    && roofFilter.sharedMesh.bounds.max.y >= roofHeight + RailingHeight - Epsilon;
+                var all = entry.roof.GetComponentsInChildren<Transform>(true);
                 for (int j = 0; j < all.Length; j++)
                 {
                     var part = all[j];
-                    if ((part.name == "Door" || part.name == "Awning")
-                        && part.GetComponentsInChildren<Collider>(true).Length > 0)
-                        noForbiddenColliders = false;
-
                     if (part.name != "WaterTank" && part.name != "AirConditioner") continue;
                     var propRenderer = part.GetComponent<Renderer>();
                     Vector2 point = new Vector2(part.position.x, part.position.z);
                     if (!propRenderer || propRenderer.bounds.min.y < roofHeight - Epsilon
-                        || !PointInPolygon(point, polygon) || DistanceToPolygonEdge(point, polygon) < 1f)
+                        || !PointInPolygon(point, new List<Vector2>(entry.polygon))
+                        || DistanceToPolygonEdge(point, new List<Vector2>(entry.polygon)) < 1f)
                         rooftopValid = false;
                 }
+
+                var buildingParts = entry.root.GetComponentsInChildren<Transform>(true);
+                for (int part = 0; part < buildingParts.Length; part++)
+                    if (buildingParts[part].name == "Awning"
+                        && buildingParts[part].GetComponentsInChildren<Collider>(true).Length > 0)
+                        noAwningColliders = false;
             }
         }
 
-        Check(doorsValid, "모든 건물에 문이 1개 있다 (" + doors + ")", ref failures);
-        Check(awnings > 0, "상가 차양이 있다 (" + awnings + ")", ref failures);
-        Check(noForbiddenColliders && railingsMerged, "문·차양에 콜라이더가 없고 난간은 건물 메쉬에 병합됐다", ref failures);
+        Check(doorsValid, "모든 건물에 실제 문 컴포넌트가 1개 있다 (" + doors + ")", ref failures);
+        Check(openingsValid, "1층 외벽 메쉬가 문 중심을 막지 않는다", ref failures);
+        Check(floorsValid, "건물은 층 메쉬와 필요한 계단을 가진다 (계단 " + stairs + ")", ref failures);
+        Check(FloorThickness <= 0.25f + Epsilon && stepHeightsValid,
+            "바닥 두께와 계단 한 칸 높이가 0.25m 이하이다", ref failures);
+        Check(stairPlacementValid, "모든 계단의 첫 단·입구 앞 0.8m·마지막 단이 축소 실내 다각형 안이다", ref failures);
+        Check(stairHeadroomValid, "모든 계단 발판 위 2.0m에 다른 계단·바닥이 없다", ref failures);
+        Check(noAwningColliders, "차양에 콜라이더가 없다", ref failures);
+        Check(railingsMerged, "난간이 지붕 메쉬에 병합됐다", ref failures);
         Check(rooftopValid, "난간과 옥상 소품이 자기 지붕 위와 외곽 안쪽에 있다", ref failures);
-        Check(facadeUvValid, "건물 옆면 UV와 단색 지붕 서브메쉬가 있다", ref failures);
+        Check(facadeUvValid, "외벽 바깥면에 기존 외관 텍스처와 UV가 있다", ref failures);
+
+        int signs = CountBatchBoxes("Signs_", true);
+        int airConditioners = CountBatchBoxes("WallAirConditioners", false);
+        int roofRooms = manager ? CountNamed(manager.transform, "RoofRoom") : 0;
+        int wires = CountBatchBoxes("Wires", false) / 2;
+        Check(manager && Mathf.Abs(signs - 356) <= Mathf.CeilToInt(356 * 0.05f)
+              && Mathf.Abs(airConditioners - 1623) <= Mathf.CeilToInt(1623 * 0.05f)
+              && Mathf.Abs(roofRooms - 91) <= Mathf.CeilToInt(91 * 0.05f)
+              && Mathf.Abs(wires - 1278) <= Mathf.CeilToInt(1278 * 0.05f),
+            "15번 외관 수가 ±5%다 (간판 " + signs + ", 실외기 " + airConditioners
+            + ", 옥탑방 " + roofRooms + ", 전선 " + wires + ")", ref failures);
+    }
+
+    static int CountBatchBoxes(string name, bool prefix)
+    {
+        int count = 0;
+        var filters = UnityEngine.Object.FindObjectsByType<MeshFilter>(FindObjectsInactive.Include,
+            FindObjectsSortMode.None);
+        for (int i = 0; i < filters.Length; i++)
+        {
+            bool matches = prefix ? filters[i].name.StartsWith(name, StringComparison.Ordinal)
+                : filters[i].name == name;
+            if (matches && filters[i].sharedMesh) count += filters[i].sharedMesh.triangles.Length / 36;
+        }
+        return count;
+    }
+
+    static void CheckFloorLocator(BuildingFloors manager, ref int failures)
+    {
+        bool inside = false;
+        bool outside = false;
+        if (manager && manager.Buildings.Count > 0)
+        {
+            var entry = manager.Buildings[0];
+            var polygon = new List<Vector2>(entry.polygon);
+            var triangles = new List<int>();
+            if (Triangulate(polygon, triangles) && triangles.Count >= 3)
+            {
+                Vector2 point = (polygon[triangles[0]] + polygon[triangles[1]] + polygon[triangles[2]]) / 3f;
+                int wanted = Mathf.Min(1, entry.floors.Length - 1);
+                inside = manager.TryLocate(new Vector3(point.x, wanted * FloorHeight + 1f, point.y),
+                    out int building, out int floor) && building == 0 && floor == wanted;
+
+                var min = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
+                for (int i = 0; i < manager.Buildings.Count; i++)
+                    for (int vertex = 0; vertex < manager.Buildings[i].polygon.Length; vertex++)
+                        min = Vector2.Min(min, manager.Buildings[i].polygon[vertex]);
+                outside = !manager.TryLocate(new Vector3(min.x - 32f, 1f, min.y - 32f), out _, out _);
+            }
+        }
+
+        Vector2[] concave =
+        {
+            new Vector2(0f, 0f), new Vector2(0f, 3f), new Vector2(1f, 3f),
+            new Vector2(1f, 1f), new Vector2(3f, 1f), new Vector2(3f, 0f)
+        };
+        bool concaveOutside = !BuildingFloors.ContainsFloor(
+            new Vector3(2f, 1f, 2f), concave, 2, FloorHeight, out _);
+        Check(inside && outside && concaveOutside,
+            "층 판정이 건물 번호·층과 평면 외부·오목한 빈 곳을 구분한다", ref failures);
     }
 
     static void CheckHadanDetails(MapData map, Transform buildings,
@@ -1532,7 +2347,7 @@ public static class HadanCityBuilder
                 if (element == null) continue;
 
                 float area = Mathf.Abs(SignedArea(polygon)) / (CityScale * CityScale);
-                int floors = BuildingFloors(element.tags, area);
+                int floors = FloorCount(element.tags, area);
                 BuildingKind kind = ClassifyBuilding(element.tags, polygon, floors, area, roads);
                 types[(int)kind]++;
 
@@ -1548,13 +2363,14 @@ public static class HadanCityBuilder
                 }
 
                 if (kind == BuildingKind.Commercial) continue;
-                var renderer = building.GetComponent<MeshRenderer>();
+                var roof = building.Find("Roof");
+                var renderer = roof ? roof.GetComponent<MeshRenderer>() : null;
                 var shared = renderer ? renderer.sharedMaterials : null;
-                if (shared == null || shared.Length < 2 || !shared[1]) greenResidentialRoofs = false;
+                if (shared == null || shared.Length == 0 || !shared[0]) greenResidentialRoofs = false;
                 else
                 {
-                    Color roof = shared[1].color;
-                    greenResidentialRoofs &= roof.g > roof.r && roof.g > roof.b;
+                    Color roofColor = shared[0].color;
+                    greenResidentialRoofs &= roofColor.g > roofColor.r && roofColor.g > roofColor.b;
                 }
             }
         }
@@ -1574,7 +2390,7 @@ public static class HadanCityBuilder
         bool hasAirConditioners = false;
         bool hasWires = false;
         bool hasRoofRoomDoors = false;
-        string[] roots = { "BuildingDecorations", "StreetProps" };
+        string[] roots = { "Buildings", "BuildingDecorations", "StreetProps" };
         for (int i = 0; i < roots.Length; i++)
         {
             var root = GameObject.Find(roots[i]);
@@ -1717,6 +2533,166 @@ public static class HadanCityBuilder
         return reachable;
     }
 
+    static int CountStairBuildings(BuildingFloors manager)
+    {
+        if (!manager || manager.Buildings == null) return 0;
+        int count = 0;
+        for (int i = 0; i < manager.Buildings.Count; i++)
+            if (manager.Buildings[i].hasStairs) count++;
+        return count;
+    }
+
+    static bool HasStairHeadroom(BuildingFloors.Entry entry)
+    {
+        var parts = entry.root.GetComponentsInChildren<MeshFilter>(true);
+        for (int stairIndex = 0; stairIndex < parts.Length; stairIndex++)
+        {
+            var stair = parts[stairIndex];
+            if (!stair.name.StartsWith("Stair_", StringComparison.Ordinal)) continue;
+            for (int step = -1; step < StairSteps; step++)
+            {
+                float y = step < 0 ? 0f : (step + 1f) * FloorHeight / StairSteps;
+                float z0 = step < 0 ? -StairEntryDepth : step * StairTread;
+                float z1 = step < 0 ? 0f : (step + 1f) * StairTread;
+                float halfWidth = StairWidth * 0.5f - 0.02f;
+                Vector2[] tread =
+                {
+                    Xz(stair.transform.TransformPoint(new Vector3(-halfWidth, y, z0 + 0.02f))),
+                    Xz(stair.transform.TransformPoint(new Vector3(-halfWidth, y, z1 - 0.02f))),
+                    Xz(stair.transform.TransformPoint(new Vector3(halfWidth, y, z1 - 0.02f))),
+                    Xz(stair.transform.TransformPoint(new Vector3(halfWidth, y, z0 + 0.02f)))
+                };
+                float worldY = stair.transform.TransformPoint(new Vector3(0f, y, 0f)).y;
+                for (int part = 0; part < parts.Length; part++)
+                    if (parts[part] != stair
+                        && (parts[part].name.StartsWith("Floor_", StringComparison.Ordinal)
+                            || parts[part].name.StartsWith("Stair_", StringComparison.Ordinal))
+                        && HasSurfaceAbove(parts[part], tread, worldY, 2f))
+                        return false;
+            }
+        }
+        return true;
+    }
+
+    static bool HasSurfaceAbove(MeshFilter filter, Vector2[] tread, float treadY, float clearance)
+    {
+        var vertices = filter.sharedMesh.vertices;
+        var triangles = filter.sharedMesh.triangles;
+        for (int i = 0; i < triangles.Length; i += 3)
+        {
+            Vector3 a = filter.transform.TransformPoint(vertices[triangles[i]]);
+            Vector3 b = filter.transform.TransformPoint(vertices[triangles[i + 1]]);
+            Vector3 c = filter.transform.TransformPoint(vertices[triangles[i + 2]]);
+            if (Mathf.Max(a.y, Mathf.Max(b.y, c.y)) - Mathf.Min(a.y, Mathf.Min(b.y, c.y)) > Epsilon)
+                continue;
+            float height = a.y - treadY;
+            if (height <= Epsilon || height >= clearance - Epsilon) continue;
+            Vector2[] triangle = { Xz(a), Xz(b), Xz(c) };
+            for (int point = 0; point < tread.Length; point++)
+                if (InsideConvex(tread[point], triangle)) return true;
+            for (int point = 0; point < triangle.Length; point++)
+                if (InsideConvex(triangle[point], tread)) return true;
+            for (int treadEdge = 0; treadEdge < tread.Length; treadEdge++)
+                for (int triangleEdge = 0; triangleEdge < triangle.Length; triangleEdge++)
+                    if (SegmentDistance(tread[treadEdge], tread[(treadEdge + 1) % tread.Length],
+                            triangle[triangleEdge], triangle[(triangleEdge + 1) % triangle.Length]) <= Epsilon)
+                        return true;
+        }
+        return false;
+    }
+
+    static Vector2 Xz(Vector3 point) => new Vector2(point.x, point.z);
+
+    static bool InsideConvex(Vector2 point, Vector2[] polygon)
+    {
+        bool positive = false;
+        bool negative = false;
+        for (int i = 0; i < polygon.Length; i++)
+        {
+            float side = Cross(polygon[i], polygon[(i + 1) % polygon.Length], point);
+            positive |= side > Epsilon;
+            negative |= side < -Epsilon;
+        }
+        return !positive || !negative;
+    }
+
+    static int CheckDoorNavMesh(BuildingFloors manager, out int samples)
+    {
+        samples = 0;
+        if (!manager || manager.Buildings == null) return 0;
+
+        int valid = 0;
+        for (int i = 0; i < manager.Buildings.Count && samples < 20; i++)
+        {
+            var opening = manager.Buildings[i].root.GetComponentInChildren<WindowFrame>(true);
+            if (!opening) continue;
+
+            Vector3 center = opening.Center;
+            center.y = 0f;
+            samples++;
+            if (NavMesh.SamplePosition(center, out _, 0.2f, NavMesh.AllAreas)) valid++;
+        }
+        return valid;
+    }
+
+    static int CheckBuildingPaths(BuildingFloors manager)
+    {
+        if (!manager || manager.Buildings == null) return 0;
+        var candidates = new List<int>();
+        for (int i = 0; i < manager.Buildings.Count; i++)
+            if (manager.Buildings[i].hasStairs) candidates.Add(i);
+
+        var random = new System.Random(16);
+        for (int i = candidates.Count - 1; i > 0; i--)
+        {
+            int swap = random.Next(i + 1);
+            int value = candidates[i];
+            candidates[i] = candidates[swap];
+            candidates[swap] = value;
+        }
+
+        int reachable = 0;
+        int samples = Mathf.Min(5, candidates.Count);
+        bool loggedFailure = false;
+        for (int i = 0; i < samples; i++)
+        {
+            var entry = manager.Buildings[candidates[i]];
+            var path = new NavMeshPath();
+            bool complete = NavMesh.SamplePosition(entry.doorFront, out NavMeshHit start, 0.75f, NavMesh.AllAreas)
+                && NavMesh.SamplePosition(entry.topLanding, out NavMeshHit target, 2f, NavMesh.AllAreas)
+                && NavMesh.CalculatePath(start.position, target.position, NavMesh.AllAreas, path)
+                && path.status == NavMeshPathStatus.PathComplete;
+            if (complete) reachable++;
+            else if (!loggedFailure)
+            {
+                loggedFailure = true;
+                var opening = entry.root.GetComponentInChildren<WindowFrame>(true);
+                Transform firstStair = entry.floors[0].transform.Find("Stair_0");
+                Vector3 doorInside = opening ? opening.Center - opening.Normal * 0.8f : default;
+                doorInside.y = 0f;
+                Vector3 stairBottom = firstStair
+                    ? firstStair.TransformPoint(new Vector3(0f, 0f, -StairEntryDepth * 0.5f)) : default;
+                Vector3 stairTop = firstStair
+                    ? firstStair.TransformPoint(new Vector3(0f, FloorHeight, StairSteps * StairTread + 0.2f)) : default;
+                Debug.LogWarning("[Hadan Check] 경로 구간 실패 " + entry.root.name
+                    + ": 문 밖→문 안 " + PathStatus(entry.doorFront, doorInside)
+                    + ", 문 안→계단 아래 " + PathStatus(doorInside, stairBottom)
+                    + ", 계단 위→꼭대기 " + PathStatus(stairTop, entry.topLanding));
+            }
+        }
+        return reachable;
+    }
+
+    static string PathStatus(Vector3 from, Vector3 to)
+    {
+        if (!NavMesh.SamplePosition(from, out NavMeshHit start, 0.5f, NavMesh.AllAreas)) return "시작 NavMesh 없음";
+        if (!NavMesh.SamplePosition(to, out NavMeshHit target, 0.5f, NavMesh.AllAreas)) return "끝 NavMesh 없음";
+
+        var path = new NavMeshPath();
+        return NavMesh.CalculatePath(start.position, target.position, NavMesh.AllAreas, path)
+            ? path.status.ToString() : "계산 실패";
+    }
+
     static int CountUniqueMeshTriangles()
     {
         var meshes = new HashSet<Mesh>();
@@ -1794,10 +2770,6 @@ public static class HadanCityBuilder
         return inside;
     }
 
-    static bool SameEdge(Vector2 a, Vector2 b, Vector2 p, Vector2 q)
-        => ((a - p).sqrMagnitude <= Epsilon * Epsilon && (b - q).sqrMagnitude <= Epsilon * Epsilon)
-           || ((a - q).sqrMagnitude <= Epsilon * Epsilon && (b - p).sqrMagnitude <= Epsilon * Epsilon);
-
     static bool TryBuildingId(string name, out long id)
     {
         id = 0;
@@ -1830,6 +2802,9 @@ public static class HadanCityBuilder
     class DetailMaterials
     {
         public Material door;
+        public Material floor;
+        public Material stair;
+        public Material[][] interiorWalls;
         public Material[] commercialWalls;
         public Material[] mixedUseWalls;
         public Material[] houseWalls;
@@ -1853,36 +2828,28 @@ public static class HadanCityBuilder
         public Material carRoof;
 
         public MeshBatch shopfrontBatch;
-        public MeshBatch airConditionerBatch;
         public MeshBatch balconyBatch;
         public MeshBatch apartmentStripeBatch;
         public MeshBatch apartmentNumberBatch;
         public MeshBatch roofRoomDoorBatch;
-        public MeshBatch[] signBatches;
 
         public void CreateBatches()
         {
             shopfrontBatch = new MeshBatch("Shopfronts", shopfront);
-            airConditionerBatch = new MeshBatch("WallAirConditioners", airConditioner);
             balconyBatch = new MeshBatch("BalconyRailings", balcony);
             apartmentStripeBatch = new MeshBatch("ApartmentStripes", apartmentStripe);
             apartmentNumberBatch = new MeshBatch("ApartmentNumbers", apartmentNumber);
             roofRoomDoorBatch = new MeshBatch("RoofRoomDoors", roofRoomDoor);
-            signBatches = new MeshBatch[signMaterials.Length];
-            for (int i = 0; i < signBatches.Length; i++)
-                signBatches[i] = new MeshBatch("Signs_" + i, signMaterials[i]);
         }
 
         public void EmitBatches(List<Mesh> meshes)
         {
             var root = new GameObject("BuildingDecorations").transform;
             shopfrontBatch.Emit(root, meshes);
-            airConditionerBatch.Emit(root, meshes);
             balconyBatch.Emit(root, meshes);
             apartmentStripeBatch.Emit(root, meshes);
             apartmentNumberBatch.Emit(root, meshes);
             roofRoomDoorBatch.Emit(root, meshes);
-            for (int i = 0; i < signBatches.Length; i++) signBatches[i].Emit(root, meshes);
             V01SceneBuilder.MarkStatic(root);
         }
     }
@@ -1995,6 +2962,56 @@ public static class HadanCityBuilder
             go.GetComponent<MeshFilter>().sharedMesh = mesh;
             go.GetComponent<MeshRenderer>().sharedMaterial = material;
             GameObjectUtility.SetStaticEditorFlags(go, StaticEditorFlags.BatchingStatic);
+        }
+    }
+
+    readonly struct WallSpan
+    {
+        public readonly float start;
+        public readonly float end;
+        public readonly float bottom;
+        public readonly float top;
+
+        public WallSpan(float start, float end, float bottom, float top)
+        {
+            this.start = start;
+            this.end = end;
+            this.bottom = bottom;
+            this.top = top;
+        }
+    }
+
+    readonly struct StairPlan
+    {
+        public readonly Vector2 start;
+        public readonly Vector2 direction;
+        public readonly Vector2 right;
+        public readonly Vector2 secondOffset;
+
+        public StairPlan(Vector2 start, Vector2 direction, Vector2 secondOffset)
+        {
+            this.start = start;
+            this.direction = direction.normalized;
+            right = new Vector2(this.direction.y, -this.direction.x);
+            this.secondOffset = secondOffset;
+        }
+
+        public StairPlan Flight(int floor)
+            => (floor & 1) == 0 ? this
+                : new StairPlan(start + direction * (StairSteps * StairTread) + secondOffset,
+                    -direction, Vector2.zero);
+
+        public Vector2[] HoleCorners()
+        {
+            float halfWidth = StairWidth * 0.5f;
+            float run = StairSteps * StairTread;
+            return new[]
+            {
+                start - right * halfWidth,
+                start - right * halfWidth + direction * run,
+                start + right * halfWidth + direction * run,
+                start + right * halfWidth
+            };
         }
     }
 

@@ -30,3 +30,10 @@
 sysinfo.txt
 crashlytics-build.properties
 *.slnx
+
+# 하단 도시 빌더가 매번 새로 만드는 파일 (메쉬 112MB > GitHub 100MB 한도).
+# 다른 컴퓨터에서는 Tools/V0.1/Build Hadan Pilot 한 번으로 다시 생긴다.
+/Assets/_Game/Data/Hadan/HadanCityMeshes.asset
+/Assets/_Game/Data/Hadan/HadanCityMeshes.asset.meta
+/Assets/_Game/Scenes/V01_City_Hadan.unity
+/Assets/_Game/Scenes/V01_City_Hadan.unity.meta

@@ -81,15 +81,18 @@ public class WallSegment : MonoBehaviour
 
     void Awake()
     {
+        if (!all.Contains(this)) all.Add(this);
         if (targets == null || targets.Length == 0) BindOwnRenderer();
         CreateRoofOpaqueMaterials();
+        if (alpha >= 0.99f && !requested) enabled = false;
     }
 
     void OnEnable() { if (!all.Contains(this)) all.Add(this); }
-    void OnDisable() => all.Remove(this);
+    void OnDisable() { if (enabled) all.Remove(this); }
 
     void OnDestroy()
     {
+        all.Remove(this);
         if (roofOpaqueMaterials == null) return;
         for (int i = 0; i < roofOpaqueMaterials.Length; i++)
             if (roofOpaqueMaterials[i]) Destroy(roofOpaqueMaterials[i]);
@@ -163,17 +166,26 @@ public class WallSegment : MonoBehaviour
     }
 
     /// <summary>이번 프레임에 이 벽이 플레이어를 가리고 있다. 매 프레임 다시 불러야 한다.</summary>
-    public void RequestFade() => requested = true;
+    public void RequestFade()
+    {
+        requested = true;
+        enabled = true;
+    }
 
     void LateUpdate()
     {
         float target = requested ? hiddenAlpha : 1f;
         requested = false;
 
-        if (Mathf.Approximately(alpha, target)) return;
+        if (Mathf.Approximately(alpha, target))
+        {
+            if (target >= 0.99f) enabled = false;
+            return;
+        }
 
         alpha = Mathf.MoveTowards(alpha, target, fadeSpeed * Time.deltaTime);
         Apply();
+        if (Mathf.Approximately(alpha, 1f)) enabled = false;
     }
 
     void Apply()
