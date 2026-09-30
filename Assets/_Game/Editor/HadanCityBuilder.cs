@@ -17,6 +17,12 @@ public static class HadanCityBuilder
     const string DataFolder = "Assets/_Game/Data/Hadan";
     const string MeshAssetPath = DataFolder + "/HadanCityMeshes.asset";
     const string BuildingTexturePath = DataFolder + "/hadan_building_windows.asset";
+    const string CommercialPlainTexturePath = DataFolder + "/hadan_facade_commercial_plain.asset";
+    const string ResidentialBrickTexturePath = DataFolder + "/hadan_facade_residential_brick.asset";
+    const string ResidentialPlainTexturePath = DataFolder + "/hadan_facade_residential_plain.asset";
+    const string ApartmentTexturePath = DataFolder + "/hadan_facade_apartment.asset";
+    const string SignTexturePath = DataFolder + "/hadan_sign_blocks.asset";
+    const string DigitTexturePath = DataFolder + "/hadan_digits.asset";
     const string DataStableKey = "HadanCityBuilder.DataFilesStable";
 
     const double CenterLat = 35.10625;
@@ -31,6 +37,13 @@ public static class HadanCityBuilder
     const float RailingHeight = 0.8f;
     const float RailingHalfThickness = 0.05f;
     const float Epsilon = 0.0001f;
+
+    static readonly int[] DigitRows =
+    {
+        7, 5, 5, 5, 7, 2, 6, 2, 2, 7, 7, 1, 7, 4, 7, 7, 1, 7, 1, 7,
+        5, 5, 7, 1, 1, 7, 4, 7, 1, 7, 7, 4, 7, 5, 7, 7, 1, 1, 1, 1,
+        7, 5, 7, 5, 7, 7, 5, 7, 1, 7
+    };
 
     static bool meshAssetCreated;
 
@@ -57,14 +70,6 @@ public static class HadanCityBuilder
         V01SceneBuilder.ApplyRenderSettings();
         V01SceneBuilder.CreateLight();
 
-        var buildingTexture = EnsureBuildingTexture();
-        var buildingMaterials = new[]
-        {
-            HadanMaterial("hadan_building_1", new Color(0.48f, 0.50f, 0.53f), buildingTexture),
-            HadanMaterial("hadan_building_2", new Color(0.61f, 0.62f, 0.64f), buildingTexture),
-            HadanMaterial("hadan_building_3", new Color(0.38f, 0.40f, 0.43f), buildingTexture)
-        };
-        var roofMaterial = HadanMaterial("hadan_roof", new Color(0.22f, 0.23f, 0.25f));
         var roadMaterial = HadanMaterial("hadan_road", new Color(0.16f, 0.17f, 0.18f));
         var groundMaterial = HadanMaterial("hadan_ground", new Color(0.30f, 0.34f, 0.29f));
         var detailMaterials = CreateDetailMaterials();
@@ -73,20 +78,19 @@ public static class HadanCityBuilder
 
         CreateGround(map, groundMaterial);
         var meshes = new List<Mesh>();
-        var buildings = CreateBuildings(map, roads, buildingMaterials, roofMaterial, detailMaterials,
+        var buildings = CreateBuildings(map, roads, detailMaterials,
             meshes, counts, out int buildingCount, out float maxHeight);
         int roadCount = CreateRoads(roads, roadMaterial, meshes);
 
         Vector2 spawn = FindSpawn(map, buildings);
-        CreateStreetProps(roads, buildings, spawn, detailMaterials, counts);
+        CreateStreetProps(roads, buildings, spawn, detailMaterials, meshes, counts);
         var clock = V01SceneBuilder.CreateGameClock();
         var player = V01SceneBuilder.CreatePlayer();
         player.transform.position = new Vector3(spawn.x, player.transform.position.y, spawn.y);
         UnityEngine.Object.DestroyImmediate(player.GetComponent<DebugStartState>());
         var arrival = new GameObject("Arrive_FromEstate");
         arrival.transform.position = player.transform.position;
-        player.GetComponent<PlayerDeath>().Bind(new[] { arrival.transform },
-            HadanMaterial("hadan_player_zombie", new Color(0.58f, 0.26f, 0.58f)));
+        V01SceneBuilder.BindPlayerDeath(player.GetComponent<PlayerDeath>(), new[] { arrival.transform });
         V01SceneBuilder.CreateCamera(player.transform);
         V01SceneBuilder.CreateHud(player, clock);
 
@@ -103,8 +107,13 @@ public static class HadanCityBuilder
         V01SceneBuilder.EnsureBuildScenes();
         int triangles = CountUniqueMeshTriangles();
         Debug.Log("[Hadan] 건물 " + buildingCount + ", 도로 " + roadCount
-                  + ", 소품 문 " + counts.doors + "/차양 " + counts.awnings
-                  + "/옥상 " + counts.rooftop + "/나무 " + counts.trees
+                  + ", 유형 상가 " + counts.types[(int)BuildingKind.Commercial]
+                  + "/아파트 " + counts.types[(int)BuildingKind.Apartment]
+                  + "/주택 " + counts.types[(int)BuildingKind.House]
+                  + "/상가주택 " + counts.types[(int)BuildingKind.MixedUse]
+                  + ", 간판 " + counts.signs + "/실외기 " + counts.wallAirConditioners
+                  + "/옥탑방 " + counts.roofRooms + "/전선 " + counts.wires
+                  + ", 소품 문 " + counts.doors + "/나무 " + counts.trees
                   + "/전봇대 " + counts.poles + "/차 " + counts.cars
                   + ", 삼각형 " + triangles.ToString("N0")
                   + ", 최고 " + maxHeight.ToString("F1") + "m, NavMesh " + watch.ElapsedMilliseconds + "ms");
@@ -166,6 +175,7 @@ public static class HadanCityBuilder
         Check(missingColliders == 0, "모든 건물에 MeshCollider가 있다", ref failures);
         Check(badFaces == 0, "건물 옆면 법선은 바깥, 지붕 법선은 위를 향한다", ref failures);
         CheckBuildingProps(root ? root.transform : null, actualBuildings, polygons, ref failures);
+        CheckHadanDetails(map, root ? root.transform : null, polygons, ref failures);
 
         var player = GameObject.Find("Player");
         bool spawnClear = false;
@@ -224,6 +234,9 @@ public static class HadanCityBuilder
         int triangles = CountUniqueMeshTriangles();
         Debug.Log("[Hadan Check] 씬 전체 고유 메쉬 삼각형 " + triangles.ToString("N0"));
         Check(triangles <= 150000, "씬 고유 메쉬 삼각형이 150,000 이하이다", ref failures);
+        int gameObjects = UnityEngine.Object.FindObjectsByType<Transform>(FindObjectsInactive.Include,
+            FindObjectsSortMode.None).Length;
+        Check(gameObjects <= 8000, "GameObject 수가 8,000 이하이다 (" + gameObjects + ")", ref failures);
         Check(EditorPrefs.GetBool(DataStableKey, false),
             "재빌드 전후 " + DataFolder + " 파일 수가 같다", ref failures);
         Check(maxHeight <= MaxFloors * FloorHeight + Epsilon,
@@ -245,32 +258,29 @@ public static class HadanCityBuilder
         return map;
     }
 
-    static Texture2D EnsureBuildingTexture()
+    static Texture2D EnsureTexture(string path, int width, int height, Func<int, int, Color> pixel,
+        TextureWrapMode wrap = TextureWrapMode.Repeat)
     {
-        var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(BuildingTexturePath);
+        var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         if (!texture)
         {
-            texture = new Texture2D(64, 64, TextureFormat.RGBA32, true) { name = "hadan_building_windows" };
-            AssetDatabase.CreateAsset(texture, BuildingTexturePath);
+            texture = new Texture2D(width, height, TextureFormat.RGBA32, true)
+                { name = Path.GetFileNameWithoutExtension(path) };
+            AssetDatabase.CreateAsset(texture, path);
         }
-        else if (texture.mipmapCount == 1)
+        else if (texture.width != width || texture.height != height || texture.mipmapCount == 1)
         {
-            texture.Reinitialize(64, 64, TextureFormat.RGBA32, true);
+            texture.Reinitialize(width, height, TextureFormat.RGBA32, true);
         }
 
-        var pixels = new Color[64 * 64];
-        // 한 장을 반복해야 건물 수가 늘어도 텍스처와 머티리얼 수가 늘지 않는다.
-        for (int y = 0; y < 64; y++)
-        for (int x = 0; x < 64; x++)
-            pixels[y * 64 + x] = y < 4
-                ? new Color(0.42f, 0.42f, 0.42f)
-                : x >= 18 && x < 46 && y >= 18 && y < 52
-                    ? new Color(0.16f, 0.22f, 0.28f)
-                    : Color.white;
+        var pixels = new Color[width * height];
+        for (int y = 0; y < height; y++)
+        for (int x = 0; x < width; x++)
+            pixels[y * width + x] = pixel(x, y);
 
         texture.SetPixels(pixels);
-        texture.wrapMode = TextureWrapMode.Repeat;
-        texture.filterMode = FilterMode.Bilinear;
+        texture.wrapMode = wrap;
+        texture.filterMode = FilterMode.Point;
         texture.Apply(true, false);
         EditorUtility.SetDirty(texture);
         return texture;
@@ -286,26 +296,128 @@ public static class HadanCityBuilder
         return material;
     }
 
+    static Material HadanSignMaterial(string id, Color color, Texture texture)
+    {
+        var material = HadanMaterial(id, color, texture);
+        if (material.HasProperty("_EmissionColor"))
+        {
+            material.EnableKeyword("_EMISSION");
+            material.SetColor("_EmissionColor", color * 0.22f);
+            EditorUtility.SetDirty(material);
+        }
+        return material;
+    }
+
     static DetailMaterials CreateDetailMaterials()
     {
-        return new DetailMaterials
+        // 왜: 유형별 창 형태와 줄눈을 텍스처에 함께 구우면 셰이더와 건물별 머티리얼을 늘리지 않는다.
+        var commercialTile = EnsureTexture(BuildingTexturePath, 64, 64, (x, y) =>
+            y >= 16 && y < 48 ? new Color(0.14f, 0.22f, 0.28f)
+            : x % 16 == 0 || y % 8 == 0 ? new Color(0.58f, 0.58f, 0.56f) : Color.white);
+        var commercialPlain = EnsureTexture(CommercialPlainTexturePath, 64, 64, (x, y) =>
+            y >= 15 && y < 49 ? new Color(0.14f, 0.22f, 0.28f) : Color.white);
+        var residentialBrick = EnsureTexture(ResidentialBrickTexturePath, 64, 64, (x, y) =>
+        {
+            bool window = x >= 20 && x < 44 && y >= 18 && y < 48;
+            if (window)
+                return x % 8 == 0 || y % 10 == 0 ? new Color(0.08f, 0.09f, 0.10f) : new Color(0.20f, 0.25f, 0.28f);
+            int shiftedX = x + (y / 8 % 2) * 8;
+            return shiftedX % 16 == 0 || y % 8 == 0 ? new Color(0.50f, 0.48f, 0.44f) : Color.white;
+        });
+        var residentialPlain = EnsureTexture(ResidentialPlainTexturePath, 64, 64, (x, y) =>
+        {
+            bool window = x >= 20 && x < 44 && y >= 18 && y < 48;
+            return window
+                ? x % 8 == 0 || y % 10 == 0 ? new Color(0.08f, 0.09f, 0.10f) : new Color(0.20f, 0.25f, 0.28f)
+                : Color.white;
+        });
+        var apartment = EnsureTexture(ApartmentTexturePath, 64, 64, (x, y) =>
+        {
+            bool window = (x >= 8 && x < 24 || x >= 40 && x < 56) && y >= 18 && y < 48;
+            if (window) return new Color(0.18f, 0.24f, 0.28f);
+            return y == 14 || y == 50 ? new Color(0.48f, 0.50f, 0.50f) : Color.white;
+        });
+        var signTexture = EnsureTexture(SignTexturePath, 64, 16, (x, y) =>
+        {
+            bool block = y >= 5 && y <= 11 && (x % 13 >= 2 && x % 13 <= 8);
+            return block ? Color.white : new Color(0.62f, 0.62f, 0.62f);
+        });
+        var digits = EnsureTexture(DigitTexturePath, 80, 8, (x, y) =>
+        {
+            int digit = x / 8;
+            int cellX = x % 8;
+            int glyphX = (cellX - 1) / 2;
+            int glyphY = (y - 1) / 1;
+            bool on = cellX >= 1 && glyphX < 3 && glyphY >= 0 && glyphY < 5
+                && (DigitRows[digit * 5 + (4 - glyphY)] & (1 << (2 - glyphX))) != 0;
+            return on ? new Color(0.10f, 0.16f, 0.22f) : new Color(0.92f, 0.90f, 0.82f);
+        }, TextureWrapMode.Clamp);
+
+        var result = new DetailMaterials
         {
             door = HadanMaterial("hadan_door", new Color(0.10f, 0.11f, 0.12f)),
-            awnings = new[]
+            commercialWalls = new[]
             {
-                HadanMaterial("hadan_awning_1", new Color(0.55f, 0.16f, 0.13f)),
-                HadanMaterial("hadan_awning_2", new Color(0.13f, 0.35f, 0.48f)),
-                HadanMaterial("hadan_awning_3", new Color(0.69f, 0.52f, 0.14f)),
-                HadanMaterial("hadan_awning_4", new Color(0.20f, 0.45f, 0.25f))
+                HadanMaterial("hadan_commercial_beige_tile", new Color(0.76f, 0.69f, 0.56f), commercialTile),
+                HadanMaterial("hadan_commercial_gray_stone", new Color(0.60f, 0.61f, 0.60f), commercialTile),
+                HadanMaterial("hadan_commercial_curtainwall", new Color(0.45f, 0.58f, 0.65f), commercialPlain),
+                HadanMaterial("hadan_commercial_white", new Color(0.85f, 0.84f, 0.80f), commercialPlain)
             },
-            tank = HadanMaterial("hadan_water_tank", new Color(0.42f, 0.46f, 0.49f)),
+            mixedUseWalls = new[]
+            {
+                HadanMaterial("hadan_mixed_red_brick", new Color(0.62f, 0.31f, 0.23f), residentialBrick),
+                HadanMaterial("hadan_mixed_brown_brick", new Color(0.48f, 0.31f, 0.23f), residentialBrick),
+                HadanMaterial("hadan_mixed_beige", new Color(0.78f, 0.70f, 0.58f), residentialPlain),
+                HadanMaterial("hadan_mixed_gray_tile", new Color(0.59f, 0.61f, 0.61f), residentialBrick),
+                HadanMaterial("hadan_mixed_dark_panel", new Color(0.29f, 0.31f, 0.32f), residentialPlain)
+            },
+            houseWalls = new[]
+            {
+                HadanMaterial("hadan_house_white", new Color(0.88f, 0.87f, 0.83f), residentialPlain),
+                HadanMaterial("hadan_house_cream", new Color(0.86f, 0.78f, 0.64f), residentialPlain),
+                HadanMaterial("hadan_house_red_brick", new Color(0.61f, 0.31f, 0.23f), residentialBrick)
+            },
+            apartmentWalls = new[]
+            {
+                HadanMaterial("hadan_apartment_white", new Color(0.88f, 0.89f, 0.87f), apartment),
+                HadanMaterial("hadan_apartment_ivory", new Color(0.86f, 0.82f, 0.72f), apartment)
+            },
+            commercialRoof = HadanMaterial("hadan_roof", new Color(0.22f, 0.23f, 0.25f)),
+            residentialRoofs = new[]
+            {
+                HadanMaterial("hadan_roof_green_1", new Color(0.16f, 0.38f, 0.24f)),
+                HadanMaterial("hadan_roof_green_2", new Color(0.22f, 0.46f, 0.27f))
+            },
+            shopfront = HadanMaterial("hadan_shopfront", new Color(0.10f, 0.16f, 0.19f)),
+            balcony = HadanMaterial("hadan_balcony", new Color(0.38f, 0.40f, 0.40f)),
+            apartmentStripe = HadanMaterial("hadan_apartment_stripe", new Color(0.24f, 0.39f, 0.52f)),
+            roofRoom = HadanMaterial("hadan_roof_room", new Color(0.67f, 0.65f, 0.57f)),
+            roofRoomDoor = HadanMaterial("hadan_roof_room_door", new Color(0.16f, 0.18f, 0.17f)),
+            tanks = new[]
+            {
+                HadanMaterial("hadan_water_tank_blue", new Color(0.18f, 0.38f, 0.58f)),
+                HadanMaterial("hadan_water_tank_green", new Color(0.20f, 0.46f, 0.31f))
+            },
             airConditioner = HadanMaterial("hadan_air_conditioner", new Color(0.67f, 0.68f, 0.66f)),
+            signMaterials = new[]
+            {
+                HadanSignMaterial("hadan_sign_red", new Color(0.75f, 0.13f, 0.10f), signTexture),
+                HadanSignMaterial("hadan_sign_blue", new Color(0.10f, 0.30f, 0.68f), signTexture),
+                HadanSignMaterial("hadan_sign_yellow", new Color(0.90f, 0.68f, 0.10f), signTexture),
+                HadanSignMaterial("hadan_sign_green", new Color(0.12f, 0.52f, 0.24f), signTexture),
+                HadanSignMaterial("hadan_sign_white", new Color(0.88f, 0.87f, 0.82f), signTexture),
+                HadanSignMaterial("hadan_sign_orange", new Color(0.90f, 0.38f, 0.08f), signTexture)
+            },
+            apartmentNumber = HadanMaterial("hadan_apartment_number", Color.white, digits),
+            wire = HadanMaterial("hadan_wire", new Color(0.055f, 0.055f, 0.05f)),
             trunk = HadanMaterial("hadan_tree_trunk", new Color(0.28f, 0.18f, 0.10f)),
             leaves = HadanMaterial("hadan_tree_leaves", new Color(0.18f, 0.34f, 0.16f)),
             pole = HadanMaterial("hadan_utility_pole", new Color(0.25f, 0.25f, 0.24f)),
             car = HadanMaterial("hadan_abandoned_car", new Color(0.28f, 0.23f, 0.20f)),
             carRoof = HadanMaterial("hadan_abandoned_car_roof", new Color(0.18f, 0.18f, 0.17f))
         };
+        result.CreateBatches();
+        return result;
     }
 
     static List<RoadInfo> RoadInfos(MapData map)
@@ -358,14 +470,15 @@ public static class HadanCityBuilder
         V01SceneBuilder.MarkStatic(ground.transform);
     }
 
-    static List<List<Vector2>> CreateBuildings(MapData map, List<RoadInfo> roads, Material[] materials,
-        Material roofMaterial, DetailMaterials details, List<Mesh> meshes, PropCounts props,
+    static List<List<Vector2>> CreateBuildings(MapData map, List<RoadInfo> roads,
+        DetailMaterials details, List<Mesh> meshes, PropCounts props,
         out int count, out float maxHeight)
     {
         var root = new GameObject("Buildings").transform;
         var polygons = new List<List<Vector2>>();
         count = 0;
         maxHeight = 0f;
+        int apartmentIndex = 0;
 
         for (int i = 0; i < map.elements.Length; i++)
         {
@@ -379,7 +492,9 @@ public static class HadanCityBuilder
                 continue;
             }
 
-            int floors = BuildingFloors(element.tags, Mathf.Abs(SignedArea(polygon)) / (CityScale * CityScale));
+            float area = Mathf.Abs(SignedArea(polygon)) / (CityScale * CityScale);
+            int floors = BuildingFloors(element.tags, area);
+            BuildingKind kind = ClassifyBuilding(element.tags, polygon, floors, area, roads);
             float height = floors * FloorHeight;
             var mesh = CreateBuildingMesh(element.id, polygon, height);
             if (!mesh)
@@ -393,19 +508,29 @@ public static class HadanCityBuilder
             go.transform.SetParent(root, false);
             go.layer = 0; // 시야 차단은 Default 레이어를 포함하므로 별도 레이어를 만들지 않는다.
             go.GetComponent<MeshFilter>().sharedMesh = mesh;
-            go.GetComponent<MeshRenderer>().sharedMaterials = new[] { materials[count % materials.Length], roofMaterial };
+            var random = RoadRandom(element.id, 7);
+            Material[] wallPalette = kind == BuildingKind.Commercial ? details.commercialWalls
+                : kind == BuildingKind.Apartment ? details.apartmentWalls
+                : kind == BuildingKind.House ? details.houseWalls : details.mixedUseWalls;
+            Material roof = kind == BuildingKind.Commercial ? details.commercialRoof
+                : details.residentialRoofs[random.Next(details.residentialRoofs.Length)];
+            go.GetComponent<MeshRenderer>().sharedMaterials = new[]
+                { wallPalette[random.Next(wallPalette.Length)], roof };
             var collider = go.GetComponent<MeshCollider>();
             collider.sharedMesh = mesh;
             collider.convex = false;
             GameObjectUtility.SetStaticEditorFlags(go, StaticEditorFlags.BatchingStatic);
 
-            CreateBuildingDetails(go.transform, element.id, polygon, height, roads, details, props);
+            CreateBuildingDetails(go.transform, element.id, polygon, floors, height, kind,
+                kind == BuildingKind.Apartment ? 101 + apartmentIndex++ : 0, roads, details, props);
 
             polygons.Add(polygon);
+            props.types[(int)kind]++;
             count++;
             maxHeight = Mathf.Max(maxHeight, height);
         }
 
+        details.EmitBatches(meshes);
         return polygons;
     }
 
@@ -458,96 +583,189 @@ public static class HadanCityBuilder
         return roadCount;
     }
 
-    static void CreateBuildingDetails(Transform building, long id, List<Vector2> polygon, float height,
-        List<RoadInfo> roads, DetailMaterials materials, PropCounts counts)
+    static void CreateBuildingDetails(Transform building, long id, List<Vector2> polygon, int floors,
+        float height, BuildingKind kind, int apartmentNumber, List<RoadInfo> roads,
+        DetailMaterials materials, PropCounts counts)
     {
-        int streetEdge = -1;
-        int longestEdge = 0;
-        float longestLength = 0f;
-        float nearestRoad = float.PositiveInfinity;
-        for (int i = 0; i < polygon.Count; i++)
-        {
-            Vector2 a = polygon[i];
-            Vector2 b = polygon[(i + 1) % polygon.Count];
-            float length = Vector2.Distance(a, b);
-            if (length > longestLength)
-            {
-                longestLength = length;
-                longestEdge = i;
-            }
-            if (length < 1.6f) continue;
-            for (int j = 0; j < roads.Count; j++)
-            {
-                float distance = DistanceToRoad(a, b, roads[j]);
-                if (distance >= nearestRoad) continue;
-                nearestRoad = distance;
-                streetEdge = i;
-            }
-        }
-        if (streetEdge < 0) streetEdge = longestEdge;
-
+        int streetEdge = FindStreetEdge(polygon, roads, kind == BuildingKind.Commercial);
         Vector2 from = polygon[streetEdge];
         Vector2 to = polygon[(streetEdge + 1) % polygon.Count];
         Vector2 edge = to - from;
+        Vector2 tangent = edge.normalized;
         Vector2 outward = new Vector2(-edge.y, edge.x).normalized;
         Vector2 center = (from + to) * 0.5f;
-        Quaternion facing = Quaternion.LookRotation(new Vector3(outward.x, 0f, outward.y));
+        var facing = Quaternion.LookRotation(new Vector3(outward.x, 0f, outward.y));
+        var random = RoadRandom(id, 17);
 
         CreatePrimitive(PrimitiveType.Cube, "Door", building,
-            new Vector3(center.x + outward.x * 0.02f, 1.1f, center.y + outward.y * 0.02f),
+            new Vector3(center.x + outward.x * 0.10f, 1.1f, center.y + outward.y * 0.10f),
             new Vector3(1.2f, 2.2f, 0.04f), facing, materials.door, false);
         counts.doors++;
 
-        bool shop = false;
-        for (int i = 0; i < roads.Count; i++)
-            if (IsCommercialRoad(roads[i].highway) && DistanceToRoad(from, to, roads[i]) <= 15f)
-            {
-                shop = true;
-                break;
-            }
-        if (shop)
+        bool hasShop = kind == BuildingKind.Commercial || kind == BuildingKind.MixedUse;
+        if (hasShop)
         {
-            var random = RoadRandom(id, 17);
+            materials.shopfrontBatch.AddBox(
+                new Vector3(center.x + outward.x * 0.05f, 1.5f, center.y + outward.y * 0.05f),
+                new Vector3(Mathf.Max(1.2f, edge.magnitude * 0.94f), 3f, 0.08f), facing);
             CreatePrimitive(PrimitiveType.Cube, "Awning", building,
                 new Vector3(center.x + outward.x * 0.6f, 2.8f, center.y + outward.y * 0.6f),
                 new Vector3(edge.magnitude * 0.6f, 0.12f, 1.2f),
-                facing * Quaternion.Euler(6f, 0f, 0f), materials.awnings[random.Next(materials.awnings.Length)], false);
+                facing * Quaternion.Euler(6f, 0f, 0f), materials.apartmentStripe, false);
             counts.awnings++;
         }
+
+        int buildingSigns = 0;
+        if (kind == BuildingKind.Commercial)
+        {
+            float chance = Mathf.Lerp(0.50f, 0.80f, (float)random.NextDouble());
+            for (int floor = 1; floor < floors; floor++)
+            {
+                if (random.NextDouble() > chance) continue;
+                AddHorizontalSign(materials, random, center, outward, facing, edge.magnitude,
+                    floor * FloorHeight + 2.65f);
+                buildingSigns++;
+            }
+            if (buildingSigns == 0)
+            {
+                AddHorizontalSign(materials, random, center, outward, facing, edge.magnitude,
+                    FloorHeight + 2.65f);
+                buildingSigns++;
+            }
+
+            int verticalSigns = 1 + random.Next(2);
+            for (int i = 0; i < verticalSigns; i++)
+            {
+                Vector2 corner = i == 0 ? from : to;
+                float signHeight = Mathf.Min(height - 2f, Mathf.Lerp(3f, 8f, (float)random.NextDouble()));
+                Vector3 signCenter = new Vector3(corner.x + outward.x * 0.4f,
+                    Mathf.Min(height - signHeight * 0.5f, 4f + signHeight * 0.5f),
+                    corner.y + outward.y * 0.4f);
+                materials.signBatches[random.Next(materials.signBatches.Length)].AddBox(signCenter,
+                    new Vector3(0.08f, signHeight, 0.8f), facing);
+                var verticalMarker = new GameObject("VerticalSignAnchor").transform;
+                verticalMarker.SetParent(building, false);
+                verticalMarker.position = new Vector3(corner.x, signCenter.y, corner.y);
+                buildingSigns++;
+            }
+
+            var marker = new GameObject("CommercialSignAnchor").transform;
+            marker.SetParent(building, false);
+            marker.position = new Vector3(center.x + outward.x * 0.05f, FloorHeight + 2.65f,
+                center.y + outward.y * 0.05f);
+        }
+        else if (kind == BuildingKind.MixedUse)
+        {
+            AddHorizontalSign(materials, random, center, outward, facing, edge.magnitude, 3.15f);
+            buildingSigns++;
+        }
+        counts.signs += buildingSigns;
+
+        bool residential = kind != BuildingKind.Commercial;
+        if (residential)
+        {
+            int firstResidentialFloor = kind == BuildingKind.MixedUse ? 1 : 0;
+            for (int floor = firstResidentialFloor; floor < floors; floor++)
+            {
+                int units = random.Next(3);
+                for (int unit = 0; unit < units; unit++)
+                {
+                    float along = Mathf.Lerp(0.18f, 0.82f, (float)random.NextDouble());
+                    Vector2 point = Vector2.Lerp(from, to, along);
+                    materials.airConditionerBatch.AddBox(
+                        new Vector3(point.x + outward.x * 0.24f, floor * FloorHeight + 1.0f,
+                            point.y + outward.y * 0.24f),
+                        new Vector3(0.8f, 0.55f, 0.45f), facing);
+                    counts.wallAirConditioners++;
+                }
+
+                float balconyChance = kind == BuildingKind.Apartment ? 0.70f
+                    : kind == BuildingKind.MixedUse ? 0.28f : 0f;
+                if (random.NextDouble() >= balconyChance) continue;
+                float width = Mathf.Min(3.2f, edge.magnitude * 0.45f);
+                Vector3 railCenter = new Vector3(center.x + outward.x * 0.38f,
+                    floor * FloorHeight + 1.35f, center.y + outward.y * 0.38f);
+                materials.balconyBatch.AddBox(railCenter, new Vector3(width, 0.10f, 0.08f), facing);
+                for (int bar = -1; bar <= 1; bar++)
+                    materials.balconyBatch.AddBox(railCenter + new Vector3(tangent.x * width * bar * 0.4f,
+                            -0.42f, tangent.y * width * bar * 0.4f),
+                        new Vector3(0.06f, 0.85f, 0.06f), facing);
+            }
+        }
+
+        if (kind == BuildingKind.Apartment)
+            AddApartmentMarkings(materials, polygon, streetEdge, height, apartmentNumber);
 
         var rooftop = new GameObject("Rooftop").transform;
         rooftop.SetParent(building, false);
         counts.rooftop += polygon.Count;
-
         var occupied = new List<Placement>();
         var roofRandom = RoadRandom(id, 31);
-        if (Mathf.Abs(SignedArea(polygon)) / (CityScale * CityScale) >= 100f)
-        {
-            if (roofRandom.Next(2) == 0
-                && TryRoofPoint(polygon, roofRandom, 0.7f, occupied, out Vector2 tankPoint))
-            {
-                CreatePrimitive(PrimitiveType.Cylinder, "WaterTank", rooftop,
-                    new Vector3(tankPoint.x, height + 0.75f, tankPoint.y), new Vector3(0.7f, 0.75f, 0.7f),
-                    Quaternion.identity, materials.tank, false);
-                occupied.Add(new Placement(tankPoint, 0.7f));
-                counts.rooftop++;
-            }
 
-            int units = roofRandom.Next(4);
-            for (int i = 0; i < units; i++)
-            {
-                if (!TryRoofPoint(polygon, roofRandom, 0.5f, occupied, out Vector2 unitPoint)) continue;
-                CreatePrimitive(PrimitiveType.Cube, "AirConditioner", rooftop,
-                    new Vector3(unitPoint.x, height + 0.3f, unitPoint.y), new Vector3(0.8f, 0.6f, 0.6f),
-                    Quaternion.Euler(0f, (float)roofRandom.NextDouble() * 360f, 0f), materials.airConditioner, false);
-                occupied.Add(new Placement(unitPoint, 0.5f));
-                counts.rooftop++;
-            }
+        if ((kind == BuildingKind.MixedUse || kind == BuildingKind.House) && roofRandom.NextDouble() < 0.30
+            && TryRoofPoint(polygon, roofRandom, 1.2f, occupied, out Vector2 roomPoint))
+        {
+            CreatePrimitive(PrimitiveType.Cube, "RoofRoom", rooftop,
+                new Vector3(roomPoint.x, height + 1.2f, roomPoint.y), new Vector3(2.4f, 2.4f, 2.4f),
+                Quaternion.identity, materials.roofRoom, false);
+            materials.roofRoomDoorBatch.AddBox(new Vector3(roomPoint.x, height + 1.1f, roomPoint.y + 1.22f),
+                new Vector3(0.8f, 1.8f, 0.04f), Quaternion.identity);
+            occupied.Add(new Placement(roomPoint, 1.2f));
+            counts.roofRooms++;
+        }
+
+        if (residential && roofRandom.Next(2) == 0
+            && TryRoofPoint(polygon, roofRandom, 0.7f, occupied, out Vector2 tankPoint))
+        {
+            CreatePrimitive(PrimitiveType.Cylinder, "WaterTank", rooftop,
+                new Vector3(tankPoint.x, height + 0.75f, tankPoint.y), new Vector3(0.7f, 0.75f, 0.7f),
+                Quaternion.identity, materials.tanks[roofRandom.Next(materials.tanks.Length)], false);
+            counts.rooftop++;
+        }
+    }
+
+    static void AddHorizontalSign(DetailMaterials materials, System.Random random, Vector2 center,
+        Vector2 outward, Quaternion facing, float wallWidth, float y)
+    {
+        float width = wallWidth * Mathf.Lerp(0.60f, 0.95f, (float)random.NextDouble());
+        float height = Mathf.Lerp(0.8f, 1.2f, (float)random.NextDouble());
+        materials.signBatches[random.Next(materials.signBatches.Length)].AddBox(
+            new Vector3(center.x + outward.x * 0.05f, y, center.y + outward.y * 0.05f),
+            new Vector3(width, height, 0.08f), facing);
+    }
+
+    static void AddApartmentMarkings(DetailMaterials materials, List<Vector2> polygon, int streetEdge,
+        float height, int number)
+    {
+        int sideEdge = (streetEdge + 1) % polygon.Count;
+        Vector2 from = polygon[sideEdge];
+        Vector2 to = polygon[(sideEdge + 1) % polygon.Count];
+        Vector2 edge = to - from;
+        Vector2 tangent = edge.normalized;
+        Vector2 outward = new Vector2(-edge.y, edge.x).normalized;
+        Vector2 center = (from + to) * 0.5f;
+        var facing = Quaternion.LookRotation(new Vector3(outward.x, 0f, outward.y));
+
+        materials.apartmentStripeBatch.AddBox(
+            new Vector3(center.x + outward.x * 0.04f, height * 0.5f, center.y + outward.y * 0.04f),
+            new Vector3(Mathf.Min(1.2f, edge.magnitude * 0.25f), height * 0.88f, 0.06f), facing);
+
+        string text = number.ToString(CultureInfo.InvariantCulture);
+        float digitWidth = Mathf.Min(0.8f, edge.magnitude / (text.Length + 1f));
+        for (int i = 0; i < text.Length; i++)
+        {
+            int digit = text[i] - '0';
+            float offset = (i - (text.Length - 1) * 0.5f) * digitWidth;
+            Vector2 point = center + tangent * offset;
+            materials.apartmentNumberBatch.AddQuad(
+                new Vector3(point.x + outward.x * 0.09f, height - 2.0f, point.y + outward.y * 0.09f),
+                new Vector3(tangent.x, 0f, tangent.y), Vector3.up, digitWidth * 0.82f, 1.25f,
+                new Vector2(digit * 0.1f, 0f), new Vector2((digit + 1) * 0.1f, 1f));
         }
     }
 
     static void CreateStreetProps(List<RoadInfo> roads, List<List<Vector2>> buildings, Vector2 spawn,
-        DetailMaterials materials, PropCounts counts)
+        DetailMaterials materials, List<Mesh> meshes, PropCounts counts)
     {
         var root = new GameObject("StreetProps").transform;
         var treeRoot = new GameObject("Trees").transform;
@@ -557,6 +775,7 @@ public static class HadanCityBuilder
         poleRoot.SetParent(root, false);
         carRoot.SetParent(root, false);
         var occupied = new List<Placement>();
+        var wireBatch = new MeshBatch("Wires", materials.wire);
 
         for (int i = 0; i < roads.Count; i++)
         {
@@ -584,6 +803,8 @@ public static class HadanCityBuilder
             if (road.highway == "tertiary" || road.highway == "residential" || road.highway == "service")
             {
                 int sign = random.Next(2) == 0 ? -1 : 1;
+                bool hasPreviousPole = false;
+                Vector2 previousPole = default;
                 for (float distance = (float)random.NextDouble() * 30f; distance < length; distance += 30f)
                 {
                     if (!PointAlongRoad(road, distance, out Vector2 point, out Vector2 direction)) continue;
@@ -593,6 +814,19 @@ public static class HadanCityBuilder
                         || !IsClearOfRoads(position, roads)) continue;
                     CreatePole(poleRoot, position, direction, materials, counts);
                     occupied.Add(new Placement(position, PoleRadius));
+
+                    if (hasPreviousPole && Vector2.Distance(previousPole, position) <= 30f + Epsilon)
+                        AddWireSpan(wireBatch, previousPole, position, direction, counts);
+                    previousPole = position;
+                    hasPreviousPole = true;
+
+                    if (random.NextDouble() >= 0.20) continue;
+                    Vector2 opposite = point - side * sign * (road.halfWidth + PoleRadius);
+                    if (!CanPlace(opposite, PoleRadius, buildings, spawn, occupied)
+                        || !IsClearOfRoads(opposite, roads)) continue;
+                    CreatePole(poleRoot, opposite, direction, materials, counts);
+                    occupied.Add(new Placement(opposite, PoleRadius));
+                    AddWireSpan(wireBatch, position, opposite, direction, counts);
                 }
             }
 
@@ -612,7 +846,24 @@ public static class HadanCityBuilder
             }
         }
 
+        wireBatch.Emit(root, meshes);
         V01SceneBuilder.MarkStatic(root);
+    }
+
+    static void AddWireSpan(MeshBatch batch, Vector2 from, Vector2 to, Vector2 roadDirection,
+        PropCounts counts)
+    {
+        Vector2 side = new Vector2(-roadDirection.y, roadDirection.x).normalized;
+        for (int wire = -1; wire <= 1; wire++)
+        {
+            Vector2 offset = side * wire * 0.65f;
+            Vector3 start = new Vector3(from.x + offset.x, 6.25f, from.y + offset.y);
+            Vector3 end = new Vector3(to.x + offset.x, 6.25f, to.y + offset.y);
+            Vector3 middle = (start + end) * 0.5f - Vector3.up * 0.5f;
+            batch.AddBeam(start, middle, 0.035f);
+            batch.AddBeam(middle, end, 0.035f);
+            counts.wires++;
+        }
     }
 
     static void CreateTree(Transform parent, Vector2 position, DetailMaterials materials, PropCounts counts)
@@ -908,6 +1159,48 @@ public static class HadanCityBuilder
         return Mathf.Clamp(floors, 1, MaxFloors);
     }
 
+    static BuildingKind ClassifyBuilding(MapTags tags, List<Vector2> polygon, int floors, float area,
+        List<RoadInfo> roads)
+    {
+        if (tags.building == "apartments") return BuildingKind.Apartment;
+        if (floors >= 4)
+            for (int edge = 0; edge < polygon.Count; edge++)
+                for (int road = 0; road < roads.Count; road++)
+                    if ((roads[road].highway == "primary" || roads[road].highway == "secondary")
+                        && DistanceToRoad(polygon[edge], polygon[(edge + 1) % polygon.Count], roads[road]) <= 15f)
+                        return BuildingKind.Commercial;
+        return area < 100f ? BuildingKind.House : BuildingKind.MixedUse;
+    }
+
+    static int FindStreetEdge(List<Vector2> polygon, List<RoadInfo> roads, bool mainRoadOnly)
+    {
+        int bestEdge = 0;
+        float bestDistance = float.PositiveInfinity;
+        float longest = 0f;
+        for (int edge = 0; edge < polygon.Count; edge++)
+        {
+            Vector2 from = polygon[edge];
+            Vector2 to = polygon[(edge + 1) % polygon.Count];
+            float length = Vector2.Distance(from, to);
+            if (length > longest)
+            {
+                longest = length;
+                if (float.IsPositiveInfinity(bestDistance)) bestEdge = edge;
+            }
+            if (length < 1.6f) continue;
+            for (int road = 0; road < roads.Count; road++)
+            {
+                if (mainRoadOnly && roads[road].highway != "primary" && roads[road].highway != "secondary")
+                    continue;
+                float distance = DistanceToRoad(from, to, roads[road]);
+                if (distance >= bestDistance) continue;
+                bestDistance = distance;
+                bestEdge = edge;
+            }
+        }
+        return bestEdge;
+    }
+
     static float RoadWidth(string highway)
     {
         switch (highway)
@@ -1160,7 +1453,6 @@ public static class HadanCityBuilder
         bool railingsMerged = root;
         bool rooftopValid = root;
         bool facadeUvValid = root;
-        Texture facadeTexture = null;
 
         if (root)
         {
@@ -1180,10 +1472,6 @@ public static class HadanCityBuilder
                 var shared = renderer ? renderer.sharedMaterials : null;
                 if (shared == null || shared.Length != 2 || !shared[0] || !shared[1]
                     || !shared[0].mainTexture || shared[1].mainTexture)
-                    facadeUvValid = false;
-                else if (!facadeTexture)
-                    facadeTexture = shared[0].mainTexture;
-                else if (facadeTexture != shared[0].mainTexture)
                     facadeUvValid = false;
 
                 if (!TryBuildingId(building.name, out long id) || !polygons.TryGetValue(id, out var polygon)
@@ -1220,6 +1508,94 @@ public static class HadanCityBuilder
         Check(noForbiddenColliders && railingsMerged, "문·차양에 콜라이더가 없고 난간은 건물 메쉬에 병합됐다", ref failures);
         Check(rooftopValid, "난간과 옥상 소품이 자기 지붕 위와 외곽 안쪽에 있다", ref failures);
         Check(facadeUvValid, "건물 옆면 UV와 단색 지붕 서브메쉬가 있다", ref failures);
+    }
+
+    static void CheckHadanDetails(MapData map, Transform buildings,
+        Dictionary<long, List<Vector2>> polygons, ref int failures)
+    {
+        var roads = RoadInfos(map);
+        var types = new int[4];
+        bool commercialSigns = buildings;
+        bool signsTouchWalls = buildings;
+        bool greenResidentialRoofs = buildings;
+
+        if (buildings)
+        {
+            for (int i = 0; i < buildings.childCount; i++)
+            {
+                Transform building = buildings.GetChild(i);
+                if (!TryBuildingId(building.name, out long id) || !polygons.TryGetValue(id, out var polygon))
+                    continue;
+                MapElement element = null;
+                for (int j = 0; j < map.elements.Length; j++)
+                    if (map.elements[j].id == id) { element = map.elements[j]; break; }
+                if (element == null) continue;
+
+                float area = Mathf.Abs(SignedArea(polygon)) / (CityScale * CityScale);
+                int floors = BuildingFloors(element.tags, area);
+                BuildingKind kind = ClassifyBuilding(element.tags, polygon, floors, area, roads);
+                types[(int)kind]++;
+
+                if (kind == BuildingKind.Commercial)
+                {
+                    var marker = building.Find("CommercialSignAnchor");
+                    commercialSigns &= marker;
+                    var all = building.GetComponentsInChildren<Transform>(true);
+                    for (int j = 0; j < all.Length; j++)
+                        if (all[j].name.EndsWith("SignAnchor", StringComparison.Ordinal))
+                            signsTouchWalls &= DistanceToPolygonEdge(
+                                new Vector2(all[j].position.x, all[j].position.z), polygon) <= 0.3f + Epsilon;
+                }
+
+                if (kind == BuildingKind.Commercial) continue;
+                var renderer = building.GetComponent<MeshRenderer>();
+                var shared = renderer ? renderer.sharedMaterials : null;
+                if (shared == null || shared.Length < 2 || !shared[1]) greenResidentialRoofs = false;
+                else
+                {
+                    Color roof = shared[1].color;
+                    greenResidentialRoofs &= roof.g > roof.r && roof.g > roof.b;
+                }
+            }
+        }
+
+        Check(types[(int)BuildingKind.Commercial] > 0 && types[(int)BuildingKind.Apartment] > 0
+              && types[(int)BuildingKind.House] > 0 && types[(int)BuildingKind.MixedUse] > 0,
+            "건물 유형 4가지가 모두 있다 (상가 " + types[(int)BuildingKind.Commercial]
+            + ", 아파트 " + types[(int)BuildingKind.Apartment]
+            + ", 주택 " + types[(int)BuildingKind.House]
+            + ", 상가주택 " + types[(int)BuildingKind.MixedUse] + ")", ref failures);
+        Check(commercialSigns, "모든 상가건물에 도로 쪽 간판 기준점이 있다", ref failures);
+        Check(signsTouchWalls, "간판 기준점이 벽에서 0.3m 이내다", ref failures);
+        Check(greenResidentialRoofs, "주거 유형 지붕이 초록 계열이다", ref failures);
+
+        bool noDecorationColliders = true;
+        bool hasSigns = false;
+        bool hasAirConditioners = false;
+        bool hasWires = false;
+        bool hasRoofRoomDoors = false;
+        string[] roots = { "BuildingDecorations", "StreetProps" };
+        for (int i = 0; i < roots.Length; i++)
+        {
+            var root = GameObject.Find(roots[i]);
+            if (!root) { noDecorationColliders = false; continue; }
+            var all = root.GetComponentsInChildren<Transform>(true);
+            for (int j = 0; j < all.Length; j++)
+            {
+                string name = all[j].name;
+                hasSigns |= name.StartsWith("Signs_", StringComparison.Ordinal);
+                hasAirConditioners |= name == "WallAirConditioners";
+                hasWires |= name == "Wires";
+                hasRoofRoomDoors |= name == "RoofRoomDoors";
+                if ((name.StartsWith("Signs_", StringComparison.Ordinal)
+                     || name == "WallAirConditioners" || name == "Wires" || name == "RoofRoomDoors")
+                    && all[j].GetComponentsInChildren<Collider>(true).Length > 0)
+                    noDecorationColliders = false;
+            }
+        }
+        Check(noDecorationColliders, "간판·실외기·전선·옥탑방 문 무늬에 콜라이더가 없다", ref failures);
+        Check(hasSigns && hasAirConditioners && hasWires && hasRoofRoomDoors,
+            "간판·실외기·전선·옥탑방 문 무늬의 결합 메쉬가 있다", ref failures);
     }
 
     static void CheckStreetProps(Dictionary<long, List<Vector2>> polygons, Vector2 spawn, ref int failures)
@@ -1435,6 +1811,14 @@ public static class HadanCityBuilder
         else { failures++; Debug.LogError("[Hadan Check] FAIL: " + message); }
     }
 
+    enum BuildingKind
+    {
+        Commercial,
+        Apartment,
+        House,
+        MixedUse
+    }
+
     class RoadInfo
     {
         public long id;
@@ -1446,24 +1830,172 @@ public static class HadanCityBuilder
     class DetailMaterials
     {
         public Material door;
-        public Material[] awnings;
-        public Material tank;
+        public Material[] commercialWalls;
+        public Material[] mixedUseWalls;
+        public Material[] houseWalls;
+        public Material[] apartmentWalls;
+        public Material commercialRoof;
+        public Material[] residentialRoofs;
+        public Material shopfront;
+        public Material balcony;
+        public Material apartmentStripe;
+        public Material roofRoom;
+        public Material roofRoomDoor;
+        public Material[] tanks;
         public Material airConditioner;
+        public Material[] signMaterials;
+        public Material apartmentNumber;
+        public Material wire;
         public Material trunk;
         public Material leaves;
         public Material pole;
         public Material car;
         public Material carRoof;
+
+        public MeshBatch shopfrontBatch;
+        public MeshBatch airConditionerBatch;
+        public MeshBatch balconyBatch;
+        public MeshBatch apartmentStripeBatch;
+        public MeshBatch apartmentNumberBatch;
+        public MeshBatch roofRoomDoorBatch;
+        public MeshBatch[] signBatches;
+
+        public void CreateBatches()
+        {
+            shopfrontBatch = new MeshBatch("Shopfronts", shopfront);
+            airConditionerBatch = new MeshBatch("WallAirConditioners", airConditioner);
+            balconyBatch = new MeshBatch("BalconyRailings", balcony);
+            apartmentStripeBatch = new MeshBatch("ApartmentStripes", apartmentStripe);
+            apartmentNumberBatch = new MeshBatch("ApartmentNumbers", apartmentNumber);
+            roofRoomDoorBatch = new MeshBatch("RoofRoomDoors", roofRoomDoor);
+            signBatches = new MeshBatch[signMaterials.Length];
+            for (int i = 0; i < signBatches.Length; i++)
+                signBatches[i] = new MeshBatch("Signs_" + i, signMaterials[i]);
+        }
+
+        public void EmitBatches(List<Mesh> meshes)
+        {
+            var root = new GameObject("BuildingDecorations").transform;
+            shopfrontBatch.Emit(root, meshes);
+            airConditionerBatch.Emit(root, meshes);
+            balconyBatch.Emit(root, meshes);
+            apartmentStripeBatch.Emit(root, meshes);
+            apartmentNumberBatch.Emit(root, meshes);
+            roofRoomDoorBatch.Emit(root, meshes);
+            for (int i = 0; i < signBatches.Length; i++) signBatches[i].Emit(root, meshes);
+            V01SceneBuilder.MarkStatic(root);
+        }
     }
 
     class PropCounts
     {
+        public readonly int[] types = new int[4];
         public int doors;
         public int awnings;
         public int rooftop;
+        public int signs;
+        public int wallAirConditioners;
+        public int roofRooms;
+        public int wires;
         public int trees;
         public int poles;
         public int cars;
+    }
+
+    class MeshBatch
+    {
+        readonly string name;
+        readonly Material material;
+        readonly List<Vector3> vertices = new List<Vector3>();
+        readonly List<Vector2> uvs = new List<Vector2>();
+        readonly List<int> triangles = new List<int>();
+
+        public MeshBatch(string name, Material material)
+        {
+            this.name = name;
+            this.material = material;
+        }
+
+        public void AddBox(Vector3 center, Vector3 size, Quaternion rotation)
+        {
+            Vector3 half = size * 0.5f;
+            var corners = new[]
+            {
+                new Vector3(-half.x, -half.y, -half.z), new Vector3(half.x, -half.y, -half.z),
+                new Vector3(half.x, half.y, -half.z), new Vector3(-half.x, half.y, -half.z),
+                new Vector3(-half.x, -half.y, half.z), new Vector3(half.x, -half.y, half.z),
+                new Vector3(half.x, half.y, half.z), new Vector3(-half.x, half.y, half.z)
+            };
+            int[,] faces =
+            {
+                { 4, 5, 6, 7 }, { 1, 0, 3, 2 }, { 5, 1, 2, 6 },
+                { 0, 4, 7, 3 }, { 7, 6, 2, 3 }, { 0, 1, 5, 4 }
+            };
+            for (int face = 0; face < 6; face++)
+            {
+                int first = vertices.Count;
+                for (int corner = 0; corner < 4; corner++)
+                    vertices.Add(center + rotation * corners[faces[face, corner]]);
+                uvs.Add(Vector2.zero);
+                uvs.Add(Vector2.right);
+                uvs.Add(Vector2.one);
+                uvs.Add(Vector2.up);
+                triangles.Add(first);
+                triangles.Add(first + 1);
+                triangles.Add(first + 2);
+                triangles.Add(first);
+                triangles.Add(first + 2);
+                triangles.Add(first + 3);
+            }
+        }
+
+        public void AddQuad(Vector3 center, Vector3 right, Vector3 up, float width, float height,
+            Vector2 uvMin, Vector2 uvMax)
+        {
+            right = right.normalized * width * 0.5f;
+            up = up.normalized * height * 0.5f;
+            int first = vertices.Count;
+            vertices.Add(center - right - up);
+            vertices.Add(center + right - up);
+            vertices.Add(center + right + up);
+            vertices.Add(center - right + up);
+            uvs.Add(uvMin);
+            uvs.Add(new Vector2(uvMax.x, uvMin.y));
+            uvs.Add(uvMax);
+            uvs.Add(new Vector2(uvMin.x, uvMax.y));
+            triangles.Add(first);
+            triangles.Add(first + 1);
+            triangles.Add(first + 2);
+            triangles.Add(first);
+            triangles.Add(first + 2);
+            triangles.Add(first + 3);
+        }
+
+        public void AddBeam(Vector3 from, Vector3 to, float thickness)
+        {
+            Vector3 direction = to - from;
+            if (direction.sqrMagnitude <= Epsilon) return;
+            AddBox((from + to) * 0.5f, new Vector3(thickness, thickness, direction.magnitude),
+                Quaternion.LookRotation(direction));
+        }
+
+        public void Emit(Transform parent, List<Mesh> meshes)
+        {
+            if (vertices.Count == 0) return;
+            var mesh = new Mesh { name = "Hadan" + name, indexFormat = IndexFormat.UInt32 };
+            mesh.SetVertices(vertices);
+            mesh.SetUVs(0, uvs);
+            mesh.SetTriangles(triangles, 0);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            meshes.Add(mesh);
+
+            var go = new GameObject(name, typeof(MeshFilter), typeof(MeshRenderer));
+            go.transform.SetParent(parent, false);
+            go.GetComponent<MeshFilter>().sharedMesh = mesh;
+            go.GetComponent<MeshRenderer>().sharedMaterial = material;
+            GameObjectUtility.SetStaticEditorFlags(go, StaticEditorFlags.BatchingStatic);
+        }
     }
 
     readonly struct Placement

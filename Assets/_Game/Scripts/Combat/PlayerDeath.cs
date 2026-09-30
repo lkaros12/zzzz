@@ -10,8 +10,12 @@ public class PlayerDeath : MonoBehaviour
     [Tooltip("부활 지점. 비어 있으면 원점 주변에서 부활한다")]
     [SerializeField] Transform[] spawnPoints;
 
-    [Tooltip("내 좀비 색. 빌더가 공유 머티리얼 에셋을 넣어준다")]
-    [SerializeField] Material corpseMaterial;
+    [Header("내 좀비 모델")]
+    [SerializeField] GameObject corpseModel;
+    [SerializeField] float corpseModelScale = 1f;
+    [SerializeField] Material[] corpseMaterials;
+    [SerializeField] RuntimeAnimatorController corpseController;
+    [SerializeField] Avatar corpseAvatar;
 
     PlayerStats stats;
     PlayerInventory inventory;
@@ -26,10 +30,15 @@ public class PlayerDeath : MonoBehaviour
     /// <summary>마지막으로 만들어진 내 좀비. 회수 대상.</summary>
     public Zombie LastCorpse { get; private set; }
 
-    public void Bind(Transform[] points, Material corpse)
+    public void Bind(Transform[] points, GameObject model, float modelScale, Material[] materials,
+                     RuntimeAnimatorController controller, Avatar avatar)
     {
         spawnPoints = points;
-        corpseMaterial = corpse;
+        corpseModel = model;
+        corpseModelScale = modelScale;
+        corpseMaterials = materials;
+        corpseController = controller;
+        corpseAvatar = avatar;
     }
 
     void Awake()
@@ -62,7 +71,7 @@ public class PlayerDeath : MonoBehaviour
     /// <summary>GDD 8항: 사망 시점의 소지품을 전부 보유한 좀비를 만든다.</summary>
     void SpawnCorpseWithBelongings()
     {
-        var corpse = Zombie.Spawn(transform.position, corpseMaterial, true);
+        var corpse = SpawnCorpse(transform.position);
 
         if (inventory)
         {
@@ -83,6 +92,14 @@ public class PlayerDeath : MonoBehaviour
         }
 
         LastCorpse = corpse;
+    }
+
+    public Zombie SpawnCorpse(Vector3 position)
+    {
+        var body = cc ? cc : GetComponent<CharacterController>();
+        return Zombie.Spawn(position, corpseModel, corpseModelScale, corpseMaterials,
+                            corpseController, corpseAvatar,
+                            body ? body.height : 1.2f, body ? body.radius : 0.26f);
     }
 
     /// <summary>GDD 8항: 랜덤한 지정 스폰 장소에서 새 생존자로 부활.</summary>

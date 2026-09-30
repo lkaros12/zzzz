@@ -1178,7 +1178,7 @@ public class Zombie : MonoBehaviour
 
         // 사망 애니메이션이 있으면 그게 끝날 때까지 시체를 남긴다. Update 는 IsDead 에서
         // 바로 빠지고, 전투/소음/암살/지도도 모두 IsDead 를 걸러 보므로 끼어들지 않는다.
-        float linger = definition && definition.model ? definition.deathLinger : 0f;
+        float linger = transform.Find("Model") ? (definition ? definition.deathLinger : 1.1f) : 0f;
         if (linger <= 0f || !Application.isPlaying) { Destroy(gameObject); return; }
 
         if (cc) cc.enabled = false;   // 시체를 밀고 다니지 않도록
@@ -1240,12 +1240,19 @@ public class Zombie : MonoBehaviour
     }
 
     /// <summary>
-    /// 3D 에셋이 없으므로 캡슐 프리미티브로 만든다.
+    /// 모델이 없을 때만 캡슐 프리미티브로 만든다.
     /// 빌더(에디트 모드) 와 런타임 양쪽에서 호출되므로 모드에 맞는 파괴 함수를 쓰고,
     /// 색은 material(인스턴스) 이 아니라 공유 머티리얼 에셋으로 받는다 — 에디트 모드에서 머티리얼이 누출된다.
     /// </summary>
     public static Zombie Spawn(Vector3 position, Material material, bool playerCorpse = false) =>
         Spawn(position, null, material, playerCorpse);
+
+    /// <summary>플레이어 좀비 모델을 플레이어와 같은 크기와 재질로 생성한다.</summary>
+    public static Zombie Spawn(Vector3 position, GameObject model, float modelScale, Material[] materials,
+                               RuntimeAnimatorController controller, Avatar avatar,
+                               float bodyHeight, float bodyRadius) =>
+        Spawn(position, null, materials != null && materials.Length > 0 ? materials[0] : null, true,
+              model, modelScale, materials, controller, avatar, bodyHeight, bodyRadius);
 
     /// <summary>GDD 16항 종류를 지정해 생성한다. 종류 에셋이 머티리얼을 들고 있으면 그것을 쓴다.</summary>
     public static Zombie Spawn(Vector3 position, ZombieDefinition type, Material material, bool playerCorpse = false)
@@ -1254,12 +1261,21 @@ public class Zombie : MonoBehaviour
         var chosen = material;
         if (!playerCorpse && type && type.placeholderMaterial) chosen = type.placeholderMaterial;
 
-        // 플레이어 좀비는 "내 시체" 라는 걸 색으로 알려야 해서 캡슐을 그대로 쓴다.
         var model = playerCorpse || !type ? null : type.model;
 
         // 콜라이더 크기는 종류 데이터에서 온다. 모델이 없으면 기존 캡슐 치수 그대로.
         float height = model ? Mathf.Max(0.4f, type.bodyHeight) : 2f;
         float radius = model ? Mathf.Clamp(type.bodyRadius, 0.05f, height * 0.5f - 0.01f) : 0.5f;
+        return Spawn(position, type, chosen, playerCorpse, model, type ? type.modelScale : 1f, null,
+                     type ? type.animatorController : null, null, height, radius);
+    }
+
+    static Zombie Spawn(Vector3 position, ZombieDefinition type, Material material, bool playerCorpse,
+                        GameObject model, float modelScale, Material[] materials,
+                        RuntimeAnimatorController controller, Avatar avatar, float height, float radius)
+    {
+        height = model ? Mathf.Max(0.4f, height) : 2f;
+        radius = model ? Mathf.Clamp(radius, 0.05f, height * 0.5f - 0.01f) : 0.5f;
         float centerHeight = height * 0.5f;
 
         GameObject go;
@@ -1272,7 +1288,8 @@ public class Zombie : MonoBehaviour
             // 모델 원점은 발밑이고 콜라이더 원점은 몸 중심이다. 그 차이만큼 내려 붙인다.
             visual.transform.localPosition = Vector3.down * centerHeight;
             visual.transform.localRotation = Quaternion.identity;
-            visual.transform.localScale = Vector3.one * Mathf.Max(0.01f, type.modelScale);
+            visual.transform.localScale = Vector3.one * Mathf.Max(0.01f, modelScale);
+            ApplyMaterials(visual, materials);
         }
         else
         {
@@ -1283,7 +1300,7 @@ public class Zombie : MonoBehaviour
             else DestroyImmediate(primitiveCollider);
 
             var meshRenderer = go.GetComponent<Renderer>();
-            if (meshRenderer && chosen) meshRenderer.sharedMaterial = chosen;
+            if (meshRenderer && material) meshRenderer.sharedMaterial = material;
         }
 
         go.name = playerCorpse ? "PlayerZombie" : (type ? "Zombie_" + type.id : "Zombie");
@@ -1303,7 +1320,7 @@ public class Zombie : MonoBehaviour
         cc.stepOffset = Mathf.Min(NavMesh.GetSettingsByID(0).agentClimb, height * 0.75f);
 
         // 모델에는 진짜 얼굴이 있으니 플레이스홀더 눈/입을 붙이지 않는다.
-        if (!model) CapsuleFace.Build(go.transform, chosen);
+        if (!model) CapsuleFace.Build(go.transform, material);
 
         var zombie = go.AddComponent<Zombie>();
         zombie.definition = type;
@@ -1325,12 +1342,33 @@ public class Zombie : MonoBehaviour
                 // 이동은 CharacterController 가 한다. 루트 모션을 켜면 두 번 움직인다.
                 animator.applyRootMotion = false;
                 animator.cullingMode = AnimatorCullingMode.CullUpdateTransforms;
-                if (type.animatorController) animator.runtimeAnimatorController = type.animatorController;
+                if (controller) animator.runtimeAnimatorController = controller;
+                if (avatar) animator.avatar = avatar;
             }
             go.AddComponent<ZombieAnimator>().SetWalkSpeedReference(zombie.moveSpeed);
         }
 
         return zombie;
+    }
+
+    static void ApplyMaterials(GameObject model, Material[] replacements)
+    {
+        if (replacements == null) return;
+
+        var renderers = model.GetComponentsInChildren<Renderer>(true);
+        for (int r = 0; r < renderers.Length; r++)
+        {
+            var materials = renderers[r].sharedMaterials;
+            for (int m = 0; m < materials.Length; m++)
+            for (int i = 0; i < replacements.Length; i++)
+                if (materials[m] && replacements[i]
+                    && replacements[i].name.EndsWith(materials[m].name))
+                {
+                    materials[m] = replacements[i];
+                    break;
+                }
+            renderers[r].sharedMaterials = materials;
+        }
     }
 
     static void SetLayerRecursive(Transform root, int layer)

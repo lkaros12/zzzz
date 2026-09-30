@@ -74,10 +74,8 @@ public static class V01SceneBuilder
         AttachContainersToFurniture();
         CreateSaveSystem(items, clock, zombieTypes);
 
-        player.GetComponent<PlayerDeath>().Bind(
-            CreateSpawnPoints(),
-            EnsureSharedMaterial("player_zombie", new Color(0.58f, 0.26f, 0.58f)));
         ApplyZombieModel(zombieTypes);
+        BindPlayerDeath(player.GetComponent<PlayerDeath>(), CreateSpawnPoints());
         SpawnZombies(zombieTypes);
         CreateNoiseDirector(zombieTypes);
         player.GetComponent<PlayerCrafting>().Bind(recipes);
@@ -423,6 +421,17 @@ public static class V01SceneBuilder
         return player;
     }
 
+    internal static void BindPlayerDeath(PlayerDeath death, Transform[] spawnPoints)
+    {
+        var model = AssetDatabase.LoadAssetAtPath<GameObject>(PlayerModelPath);
+        var avatar = AssetDatabase.LoadAssetAtPath<Avatar>(PlayerModelPath);
+        var controller = AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(ZombieControllerPath);
+        if (!controller) controller = EnsureZombieController();
+
+        death.Bind(spawnPoints, model, PlayerHeight / MeasurePlayerModelHeight(model),
+                   EnsurePlayerZombieMaterials(), controller, avatar);
+    }
+
     internal static void CreateCamera(Transform target)
     {
         var go = new GameObject("Main Camera") { tag = "MainCamera" };
@@ -513,7 +522,7 @@ public static class V01SceneBuilder
             EnsureItemCatalog(items),
             clock,
             EnsureSharedMaterial("zombie", new Color(0.32f, 0.52f, 0.30f)),
-            EnsureSharedMaterial("player_zombie", new Color(0.58f, 0.26f, 0.58f)),
+            EnsurePlayerZombieMaterials()[0],
             zombieTypes);
     }
 
@@ -3962,7 +3971,11 @@ public static class V01SceneBuilder
         var states = controller.layers[0].stateMachine.states;
         Check(states.Length == 4, "상태가 4개다 (Idle/Walk/Attack/Death)");
         for (int i = 0; i < states.Length; i++)
+        {
             Check(states[i].state.motion != null, states[i].state.name + " 상태에 클립이 물려 있다");
+            Check(states[i].state.motion is AnimationClip clip && clip.humanMotion,
+                  states[i].state.name + " 상태 클립이 휴머노이드 리타기팅을 지원한다");
+        }
 
         // ZombieAnimator 가 쓰는 이름과 컨트롤러의 이름이 어긋나면 조용히 아무 일도 안 일어난다.
         Check(FindState(states, "Walk").speedParameterActive
@@ -4038,6 +4051,66 @@ public static class V01SceneBuilder
         finally
         {
             Object.DestroyImmediate(spawned.gameObject);
+        }
+
+        // ---- 플레이어 사망 좀비 ----
+        var playerDeath = Object.FindFirstObjectByType<PlayerDeath>();
+        if (!playerDeath) { Check(false, "PlayerDeath가 씬 플레이어에 붙어 있다"); return; }
+        var playerModel = (GameObject)FieldValue(playerDeath, "corpseModel");
+        float playerModelScale = (float)FieldValue(playerDeath, "corpseModelScale");
+        var playerMaterials = (Material[])FieldValue(playerDeath, "corpseMaterials");
+        var playerController = (RuntimeAnimatorController)FieldValue(playerDeath, "corpseController");
+        var playerAvatar = (Avatar)FieldValue(playerDeath, "corpseAvatar");
+        Check(playerModel == AssetDatabase.LoadAssetAtPath<GameObject>(PlayerModelPath),
+              "PlayerDeath에 character01 모델이 연결됐다");
+        Check(Mathf.Abs(playerModelScale - playerDeath.transform.Find("Model").localScale.x) < 0.001f,
+              "PlayerDeath의 모델 배율이 플레이어와 같다");
+        if (playerMaterials == null) { Check(false, "PlayerDeath에 character01 좀비 재질이 연결됐다"); return; }
+        Check(playerMaterials.Length == 2, "PlayerDeath에 character01 좀비 재질 2개가 연결됐다");
+        for (int i = 0; i < playerMaterials.Length; i++)
+        {
+            Check(playerMaterials[i] && playerMaterials[i].name.StartsWith("character01_zombie_"),
+                  "character01 좀비 재질 사본 이름이 맞다");
+            Check(playerMaterials[i].GetTexture("_BaseMap"),
+                  playerMaterials[i].name + "이 기존 텍스처를 참조한다");
+        }
+        Check(playerController == controller, "PlayerDeath에 Zombie.controller가 연결됐다");
+        Check(playerAvatar == AssetDatabase.LoadAssetAtPath<Avatar>(PlayerModelPath),
+              "PlayerDeath에 character01 아바타가 연결됐다");
+
+        var playerBody = playerDeath.GetComponent<CharacterController>();
+        Zombie playerCorpse = null;
+        try
+        {
+            playerCorpse = playerDeath.SpawnCorpse(new Vector3(602f, 0f, 0f));
+            var corpseBody = playerCorpse.GetComponent<CharacterController>();
+            Check(Mathf.Abs(corpseBody.height - playerBody.height) < 0.001f
+                  && Mathf.Abs(corpseBody.radius - playerBody.radius) < 0.001f,
+                  "플레이어 좀비 콜라이더가 플레이어와 같다");
+            Check(Mathf.Abs(playerCorpse.transform.Find("Model").localScale.x - playerModelScale) < 0.001f,
+                  "플레이어 좀비가 플레이어와 같은 배율을 쓴다");
+            Check(!playerCorpse.GetComponent<MeshRenderer>(), "플레이어 좀비에 캡슐 MeshRenderer가 없다");
+            Check(playerCorpse.GetComponentInChildren<SkinnedMeshRenderer>(),
+                  "플레이어 좀비에 SkinnedMeshRenderer가 있다");
+            var corpseRenderers = playerCorpse.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+            for (int r = 0; r < corpseRenderers.Length; r++)
+            for (int m = 0; m < corpseRenderers[r].sharedMaterials.Length; m++)
+                Check(System.Array.IndexOf(playerMaterials, corpseRenderers[r].sharedMaterials[m]) >= 0,
+                      "플레이어 좀비가 character01 좀비 재질 사본을 쓴다");
+            var corpseAnimator = playerCorpse.GetComponentInChildren<Animator>();
+            Check(corpseAnimator && corpseAnimator.runtimeAnimatorController == controller,
+                  "플레이어 좀비 Animator가 Zombie.controller를 쓴다");
+            Check(corpseAnimator.avatar == playerAvatar && playerAvatar.isHuman,
+                  "플레이어 좀비 Animator가 character01 휴머노이드 아바타를 쓴다");
+            Check(playerCorpse.GetComponent<ZombieAnimator>(), "플레이어 좀비에 ZombieAnimator가 붙었다");
+            Check(!playerCorpse.GetComponentInChildren<HairSpring>(true)
+                  && !playerCorpse.GetComponentInChildren<PlayerLookAtRelay>(true)
+                  && !playerCorpse.GetComponentInChildren<PlayerAnimator>(true),
+                  "플레이어 좀비에 플레이어 전용 컴포넌트가 없다");
+        }
+        finally
+        {
+            if (playerCorpse) Object.DestroyImmediate(playerCorpse.gameObject);
         }
 
         // 시체가 남아 있는 동안 스폰 상한이 어긋나지 않아야 한다.
@@ -5352,6 +5425,38 @@ public static class V01SceneBuilder
             Debug.Log("[V0.1] " + source.name + ": _BaseMap <- " + mapping[1] + ", _BumpMap <- " + mapping[2]);
         }
         AssetDatabase.SaveAssets();
+    }
+
+    static Material[] EnsurePlayerZombieMaterials()
+    {
+        var materials = new Material[PlayerMaterialTextures.Length];
+        for (int i = 0; i < materials.Length; i++)
+        {
+            string sourceName = PlayerMaterialTextures[i][0];
+            var source = AssetDatabase.LoadAssetAtPath<Material>(PlayerMaterialFolder + "/" + sourceName + ".mat");
+            if (!source) throw new System.IO.FileNotFoundException("character01 재질이 없습니다: " + sourceName);
+
+            string name = "character01_zombie_" + sourceName;
+            string path = PlayerMaterialFolder + "/" + name + ".mat";
+            var material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (!material)
+            {
+                material = new Material(source);
+                AssetDatabase.CreateAsset(material, path);
+            }
+            else
+            {
+                material.shader = source.shader;
+                material.CopyPropertiesFromMaterial(source);
+            }
+
+            material.name = name;
+            material.SetColor("_BaseColor", source.GetColor("_BaseColor") * new Color(0.55f, 0.65f, 0.52f, 1f));
+            EditorUtility.SetDirty(material);
+            materials[i] = material;
+        }
+        AssetDatabase.SaveAssets();
+        return materials;
     }
 
     static bool HasPlayerImages()

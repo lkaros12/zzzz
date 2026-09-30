@@ -22,6 +22,7 @@ public class SaveSystem : MonoBehaviour
     [SerializeField] ZombieDefinition[] zombieTypes;
 
     PlayerStats stats;
+    PlayerDeath playerDeath;
     Transform player;
 
     /// <summary>UI/디버그용 마지막 결과 메시지.</summary>
@@ -54,6 +55,7 @@ public class SaveSystem : MonoBehaviour
         if (!stats) return;
 
         player = stats.transform;
+        playerDeath = stats.GetComponent<PlayerDeath>();
     }
 
     void Update()
@@ -443,12 +445,15 @@ public class SaveSystem : MonoBehaviour
         {
             var entry = data.zombies[i];
 
-            var zombie = Zombie.Spawn(entry.position,
-                FindZombieType(entry.typeId),
-                entry.isPlayerCorpse ? corpseMaterial : zombieMaterial,
-                entry.isPlayerCorpse);
+            var zombie = entry.isPlayerCorpse && playerDeath
+                ? playerDeath.SpawnCorpse(entry.position)
+                : Zombie.Spawn(entry.position, FindZombieType(entry.typeId),
+                               entry.isPlayerCorpse ? corpseMaterial : zombieMaterial,
+                               entry.isPlayerCorpse);
             var cc = zombie.GetComponent<CharacterController>();
-            zombie.transform.position -= Vector3.up * (cc.height * 0.5f - 0.05f);
+            if (entry.isPlayerCorpse && Physics.Raycast(entry.position, Vector3.down, out var ground, 3f))
+                zombie.transform.position = ground.point + Vector3.up * (cc.height * 0.5f);
+            else zombie.transform.position -= Vector3.up * (cc.height * 0.5f - 0.05f);
 
             zombie.transform.rotation = Quaternion.Euler(0f, entry.yaw, 0f);
             zombie.LoadHealth(entry.health);
