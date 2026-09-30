@@ -12,3 +12,4 @@
 - [메쉬 예산과 정적 배칭 측정 함정](mesh-budget-and-batching-trap.md) — 블렌더 작업본은 15~40배 무겁게 들어옴, 배칭 때문에 삼각형이 10배 뻥튀기됨, 저폴리 숲 만드는 법
 - [좀비 갱신 등급제와 중력 함정](zombie-update-tiers-gravity-trap.md) — 건너뛴 프레임만큼 낙하가 dt 제곱으로 커져 좀비가 제자리에 붙음, 성능 A/B 측정 오염 주의
 - [재생 중이면 알아서 멈추고 작업](stop-play-before-work.md) — 묻지 말고 stop 후 빌드, 사용자는 재생 중인 줄 몰랐음
+- [하단 도시 생성물은 git 에 없음](hadan-city-generated-not-in-git.md) — 받은 뒤 Build Hadan Pilot 한 번, 112MB 로 push 거부됐던 이유
