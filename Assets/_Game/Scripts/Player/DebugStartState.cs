@@ -89,7 +89,7 @@ public class DebugStartState : MonoBehaviour
     }
 
     /// <summary>
-    /// 주무기/보조무기 슬롯에 들어갈 무기를 각각 하나씩 장착한다.
+    /// 주무기와 방패를 각각 하나씩 장착한다.
     /// 무장 없이 시작하면 맨손 6뎀으로 좀비 4마리를 못 버티고 소지품이 전부 좀비에게 넘어간다.
     /// </summary>
     void EquipBestWeapons()
@@ -98,10 +98,9 @@ public class DebugStartState : MonoBehaviour
         var equipment = GetComponent<PlayerEquipment>();
         if (!inventory || !equipment) return;
 
-        // GDD 21항 "한손 무기 + 방패" 조합을 바로 시험할 수 있게, 방패가 있으면 그것을 보조무기로.
-        bool shielded = TryEquipFrom(inventory, equipment, EquipmentSlot.OffHand, true);
+        // GDD 21항 "한손 무기 + 방패" 조합을 바로 시험할 수 있게 방패부터 장착한다.
+        TryEquipFrom(inventory, equipment, EquipmentSlot.OffHand, true);
         TryEquipFrom(inventory, equipment, EquipmentSlot.MainHand, false);
-        if (!shielded) TryEquipFrom(inventory, equipment, EquipmentSlot.OffHand, false);
     }
 
     /// <summary>shieldWanted 면 방패만, 아니면 공격력 있는 무기만 골라 그 칸에 끼운다.</summary>

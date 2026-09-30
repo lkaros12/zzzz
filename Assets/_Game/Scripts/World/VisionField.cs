@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 /// <summary>
 /// 기획 8·9·10항 시야 판정. 눈높이에서 사방으로 광선을 쏴 "어느 방향으로 얼마나 멀리 보이는가"
@@ -48,8 +49,13 @@ public class VisionField : MonoBehaviour
     float[] coneWeight;     // 부채꼴 안이면 1, 가장자리에서 0 으로
     PlayerAim aim;
     PlayerAssassinate assassinate;
+    PlayerStats stats;
+    InventoryUI inventoryUi;
+    float flashlightRange;
 
     public float Range => range;
+    public float FlashlightRange => flashlightRange;
+    public bool FlashlightOn { get; private set; } = true;
     /// <summary>눈 위치. 음영 텍스처의 중심이기도 하다.</summary>
     public Vector3 Origin { get; private set; }
     /// <summary>검증용. 마지막으로 쓴 정면 방향(XZ).</summary>
@@ -57,11 +63,31 @@ public class VisionField : MonoBehaviour
 
     void Awake()
     {
+        flashlightRange = range;
         aim = GetComponent<PlayerAim>();
         assassinate = GetComponent<PlayerAssassinate>();
+        stats = GetComponent<PlayerStats>();
+        inventoryUi = FindFirstObjectByType<InventoryUI>();
         Allocate();
         Sample();
     }
+
+    void Update()
+    {
+        var keyboard = Keyboard.current;
+        if (CanToggleFlashlight(keyboard != null && keyboard.fKey.wasPressedThisFrame,
+                               stats && stats.IsDead, inventoryUi && inventoryUi.IsOpen))
+            SetFlashlight(!FlashlightOn);
+    }
+
+    public void SetFlashlight(bool enabled)
+    {
+        FlashlightOn = enabled;
+        range = enabled ? flashlightRange : alwaysVisibleRadius;
+    }
+
+    public static bool CanToggleFlashlight(bool pressed, bool dead, bool inventoryOpen) =>
+        pressed && !dead && !inventoryOpen;
 
     void LateUpdate() => Sample();
 

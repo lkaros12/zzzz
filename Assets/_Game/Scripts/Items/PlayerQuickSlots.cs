@@ -3,7 +3,7 @@ using UnityEngine;
 /// <summary>
 /// GDD 5항 하단 중앙 퀵슬롯. 무기 슬롯과 소모품 슬롯을 분리한다.
 ///
-/// 1번 = 주무기, 2번 = 보조무기 — 이 두 칸은 등록이 곧 장착이다.
+/// 1번 = 주무기, 2번 = 방패 — 이 두 칸은 등록이 곧 장착이다.
 /// PlayerEquipment 를 그대로 비추므로 Tab 화면의 장비 목록과 이중 관리되지 않는다.
 /// 3~5번 = 소모품. 아이템 종류(id) 를 기억하고 숫자키로 사용한다.
 /// </summary>
@@ -105,8 +105,7 @@ public class PlayerQuickSlots : MonoBehaviour
 
         if (IsWeaponSlot(index))
         {
-            // 어느 손에 들어갈 수 있는지는 PlayerEquipment 가 판단한다
-            // (총/양손 = 주무기, 한손 근접 = 양쪽, 방패 = 보조무기).
+            // 2번도 OffHand 를 그대로 비추되 PlayerEquipment 규칙상 방패만 들어간다.
             var slot = WeaponSlotFor(index);
             if (!equipment || !equipment.TryEquipTo(slot, stack)) return false;
 
@@ -197,7 +196,7 @@ public class PlayerQuickSlots : MonoBehaviour
     public static string SlotName(int index)
     {
         if (index == 0) return "주무기";
-        if (index == 1) return "보조무기";
+        if (index == 1) return "방패";
 
         return (index + 1).ToString();
     }

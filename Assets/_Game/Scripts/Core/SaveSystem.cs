@@ -341,16 +341,39 @@ public class SaveSystem : MonoBehaviour
         targetEquipment.StripAll();
         for (int i = 0; i < data.equipment.Count; i++)
         {
-            var definition = itemCatalog.Find(data.equipment[i].id);
+            var saved = data.equipment[i];
+            var definition = itemCatalog.Find(saved.id);
             if (!definition) continue;
 
-            int durability = data.equipment[i].durability < 0 ? definition.maxDurability : data.equipment[i].durability;
-            targetEquipment.LoadEquip((EquipmentSlot)data.equipment[i].slot, definition, durability);
+            var slot = (EquipmentSlot)saved.slot;
+            int durability = saved.durability < 0 ? definition.maxDurability : saved.durability;
+            int loadedAmmo = saved.loadedAmmo < 0 ? definition.magazineSize : saved.loadedAmmo;
+            if (!PlayerEquipment.CanEquipTo(slot, definition))
+            {
+                var stack = new ItemStack
+                {
+                    definition = definition, quantity = 1,
+                    durability = durability, loadedAmmo = loadedAmmo,
+                };
+                var inventory = targetEquipment.GetComponent<PlayerInventory>();
+                if (!inventory || !inventory.TryPlaceStack(stack))
+                {
+                    var drop = new WorldItemSave
+                    {
+                        id = definition.id, quantity = 1, position = targetEquipment.transform.position,
+                        durability = durability, loadedAmmo = loadedAmmo,
+                    };
+                    data.worldItems.Add(drop);
+                    WorldItem.Spawn(definition, 1, drop.position, Vector3.zero)
+                             .SetDurability(durability).SetAmmo(loadedAmmo);
+                }
+                continue;
+            }
 
-            var loaded = targetEquipment.GetStack((EquipmentSlot)data.equipment[i].slot);
-            if (loaded != null)
-                loaded.loadedAmmo = data.equipment[i].loadedAmmo < 0
-                    ? definition.magazineSize : data.equipment[i].loadedAmmo;
+            targetEquipment.LoadEquip(slot, definition, durability);
+
+            var loaded = targetEquipment.GetStack(slot);
+            if (loaded != null) loaded.loadedAmmo = loadedAmmo;
         }
     }
 

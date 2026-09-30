@@ -33,6 +33,7 @@ public class PlayerEquipment : MonoBehaviour
     public float MoveSpeedMultiplier { get; private set; } = 1f;
     public float StaminaCostMultiplier { get; private set; } = 1f;
     public float InjuryChanceMultiplier { get; private set; } = 1f;
+    public string LastMessage { get; private set; } = string.Empty;
 
     void Awake()
     {
@@ -58,8 +59,13 @@ public class PlayerEquipment : MonoBehaviour
     /// 인벤토리의 스택에서 1개를 꺼내 장착한다. 이미 낀 장비는 인벤토리로 돌아간다.
     /// 돌려줄 칸이 없으면 장착을 포기한다 — 장비를 잃어버리는 쪽이 최악이다.
     /// </summary>
-    public bool TryEquip(ItemStack stack) =>
-        TryEquipTo(stack != null && stack.definition ? stack.definition.equipSlot : EquipmentSlot.None, stack);
+    public bool TryEquip(ItemStack stack) => TryEquipTo(
+        stack != null && stack.definition && stack.definition.isShield
+            ? EquipmentSlot.OffHand
+            : stack != null && IsOneHandedMelee(stack.definition)
+            ? EquipmentSlot.MainHand
+            : stack != null && stack.definition ? stack.definition.equipSlot : EquipmentSlot.None,
+        stack);
 
     /// <summary>
     /// 슬롯을 지정해 장착한다. 한손 무기는 주무기 칸에도 들어갈 수 있어야 해서 필요하다
@@ -67,14 +73,25 @@ public class PlayerEquipment : MonoBehaviour
     /// </summary>
     public bool TryEquipTo(EquipmentSlot slot, ItemStack stack)
     {
+        LastMessage = string.Empty;
         if (stack == null || !stack.definition) return false;
         if (slot == EquipmentSlot.None) return false;
 
         var definition = stack.definition;
         if (!CanEquipTo(slot, definition)) return false;
 
+        var mainHand = Get(EquipmentSlot.MainHand);
+        if (definition.isShield && !CanShareShield(mainHand))
+        {
+            LastMessage = "양손·원거리 무기와 방패는 함께 들 수 없습니다";
+            return false;
+        }
+
         var previous = equipped[(int)slot];
         if (previous != null && previous.definition == definition) return false;
+        var shield = slot == EquipmentSlot.MainHand && !CanShareShield(definition)
+            ? GetStack(EquipmentSlot.OffHand)
+            : null;
 
         // 내구도와 잔탄을 먼저 챙긴다 — TakeFrom 이 스택을 리스트에서 지울 수 있다.
         // 잔탄을 빼먹으면 총을 장착하는 순간 탄이 사라진다 (실제로 겪었다).
@@ -93,6 +110,22 @@ public class PlayerEquipment : MonoBehaviour
             return false;
         }
 
+        if (shield != null && !inventory.TryPlaceStack(shield))
+        {
+            if (previous != null)
+            {
+                inventory.TakeFrom(previous, 1);
+                previous.quantity = 1;
+            }
+            equipped[(int)slot] = previous;
+            inventory.TryPlaceStack(MakeEquipped(definition, carriedDurability, carriedAmmo));
+            LastMessage = "인벤토리에 방패를 넣을 자리가 없습니다";
+            Recalculate();
+            return false;
+        }
+
+        if (shield != null) equipped[(int)EquipmentSlot.OffHand] = null;
+
         Recalculate();
         return true;
     }
@@ -100,27 +133,28 @@ public class PlayerEquipment : MonoBehaviour
     /// <summary>
     /// 어떤 물건이 어떤 슬롯에 들어갈 수 있는지. 손 슬롯만 예외 규칙이 있다.
     ///
-    /// 사용자 결정: 총은 무조건 주무기, 양손 무기도 주무기.
-    /// GDD 21항을 위해 한손 근접 무기는 양쪽 손 어디든 들어간다.
-    /// 방패는 보조무기 칸 전용 — 우클릭이 방어 자세라서 주무기 칸에 있으면 의미가 없다.
+    /// 사용자 결정: 주무기 칸은 무기, 보조손 칸은 방패만 들어간다.
     /// </summary>
     public static bool CanEquipTo(EquipmentSlot slot, ItemDefinition definition)
     {
         if (!definition || slot == EquipmentSlot.None) return false;
 
-        bool handSlot = slot == EquipmentSlot.MainHand || slot == EquipmentSlot.OffHand;
-        if (!handSlot) return definition.equipSlot == slot;
-
-        if (definition.isShield) return slot == EquipmentSlot.OffHand;
-
-        // 한손 근접 무기만 양손 슬롯 겸용.
-        if (IsOneHandedMelee(definition)) return true;
-
+        if (slot == EquipmentSlot.OffHand) return definition.isShield;
+        if (slot == EquipmentSlot.MainHand)
+            return !definition.isShield
+                   && (definition.equipSlot == EquipmentSlot.MainHand || IsOneHandedMelee(definition));
         return definition.equipSlot == slot;
     }
 
     public static bool IsOneHandedMelee(ItemDefinition definition) =>
-        definition && definition.handedness == WeaponHandedness.OneHanded && !definition.ranged;
+        definition && !definition.isShield
+        && definition.handedness == WeaponHandedness.OneHanded && !definition.ranged;
+
+    public static bool IsTwoHandedMelee(ItemDefinition definition) =>
+        definition && definition.handedness == WeaponHandedness.TwoHanded && !definition.ranged;
+
+    public static bool CanShareShield(ItemDefinition definition) =>
+        !definition || IsOneHandedMelee(definition);
 
     public bool Unequip(EquipmentSlot slot)
     {
@@ -235,7 +269,7 @@ public class PlayerEquipment : MonoBehaviour
             case EquipmentSlot.Legs: return "다리";
             case EquipmentSlot.Feet: return "신발";
             case EquipmentSlot.MainHand: return "주무기";
-            case EquipmentSlot.OffHand: return "보조무기";
+            case EquipmentSlot.OffHand: return "방패";
             case EquipmentSlot.Backpack: return "가방";
             case EquipmentSlot.Misc: return "기타";
             default: return "-";

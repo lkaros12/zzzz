@@ -274,7 +274,9 @@ public class InventoryUI : MonoBehaviour
                 if (hintText)
                     hintText.text = ok
                         ? PlayerQuickSlots.SlotName(slot) + " 칸: " + definition.displayName
-                        : definition.displayName + " 은 " + PlayerQuickSlots.SlotName(slot) + " 칸에 넣을 수 없습니다";
+                        : equipment && !string.IsNullOrEmpty(equipment.LastMessage)
+                            ? equipment.LastMessage
+                            : definition.displayName + " 은 " + PlayerQuickSlots.SlotName(slot) + " 칸에 넣을 수 없습니다";
 
                 ForceRefresh();
                 return;
@@ -410,12 +412,13 @@ public class InventoryUI : MonoBehaviour
 
         if (definition.equipSlot != EquipmentSlot.None)
         {
+            bool equipped = equipment && equipment.TryEquip(stack);
             if (hintText)
-                hintText.text = equipment && equipment.TryEquip(stack)
+                hintText.text = equipped
                     ? definition.displayName + " 장착"
-                    : definition.displayName + " 을 장착할 수 없습니다";
-            else if (equipment)
-                equipment.TryEquip(stack);
+                    : equipment && !string.IsNullOrEmpty(equipment.LastMessage)
+                        ? equipment.LastMessage
+                        : definition.displayName + " 을 장착할 수 없습니다";
         }
         else if (consumer)
         {

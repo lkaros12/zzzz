@@ -123,7 +123,7 @@ public class VisionFog : MonoBehaviour
     void UpdateMask()
     {
         // 시야 범위보다 조금 넓게 잡는다. 딱 맞추면 가장자리 보간에서 밝기가 샌다.
-        float size = (field.Range + 2f) * 2f;
+        float size = (field.FlashlightRange + 2f) * 2f;
         AreaSize = size;
 
         Vector3 origin = field.Origin - new Vector3(size * 0.5f, 0f, size * 0.5f);

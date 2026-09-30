@@ -11,6 +11,7 @@ public class PickupPromptUI : MonoBehaviour
     [SerializeField] PlayerConsumer consumer;
     [SerializeField] PlayerAssassinate assassinate;
     [SerializeField] PlayerShield shield;
+    [SerializeField] VisionField vision;
     [SerializeField] Text promptText;
     [Tooltip("아이템 사용 결과 메시지를 띄워두는 시간")]
     [SerializeField] float messageDuration = 2f;
@@ -74,8 +75,10 @@ public class PickupPromptUI : MonoBehaviour
         }
 
         var item = interactor ? interactor.NearestItem : null;
-        promptText.enabled = item != null;
+        bool flashlightOff = vision && !vision.FlashlightOn;
+        promptText.enabled = item != null || flashlightOff;
         if (item != null) promptText.text = "[E] " + item.Label;
+        else if (flashlightOff) promptText.text = "손전등 꺼짐";
     }
 
     public void Bind(PlayerInteractor playerInteractor, PlayerConsumer playerConsumer, Text prompt)
@@ -88,6 +91,7 @@ public class PickupPromptUI : MonoBehaviour
         {
             assassinate = playerInteractor.GetComponent<PlayerAssassinate>();
             shield = playerInteractor.GetComponent<PlayerShield>();
+            vision = playerInteractor.GetComponent<VisionField>();
         }
     }
 }

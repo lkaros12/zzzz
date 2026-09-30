@@ -51,7 +51,7 @@ public class PlayerCombat : MonoBehaviour
     // GDD 20항: 이번 공격이 실을 넉백/경직. 판정 메서드 인자를 늘리지 않기 위해 sortOrigin 과 같은 방식으로 둔다.
     float pendingKnockback;
     float pendingStagger;
-    readonly float[] nextAttackTime = new float[2];
+    float nextAttackTime;
     float reloadEndTime;
 
     /// <summary>UI/디버그용. 마지막 공격에 맞은 대상 수.</summary>
@@ -63,7 +63,19 @@ public class PlayerCombat : MonoBehaviour
     /// <summary>마지막으로 시작한 공격의 간격. 애니메이션 속도 계산에 쓴다.</summary>
     public float AttackInterval { get; private set; }
 
-    public bool IsAttacking => Time.time < nextAttackTime[0] || Time.time < nextAttackTime[1];
+    public bool IsAttacking => Time.time < nextAttackTime;
+
+    /// <summary>우클릭을 누르고 있고 다른 행동에 막히지 않았을 때만 조준 중이다.</summary>
+    public bool IsAiming
+    {
+        get
+        {
+            var mouse = Mouse.current;
+            return CanAim(mouse != null && mouse.rightButton.isPressed, IsPointerOverUI(),
+                          stats && stats.IsDead, grapple && grapple.IsGrappled,
+                          assassinate && assassinate.IsAssassinating, IsReloading);
+        }
+    }
 
     /// <summary>UI 에 띄우는 마지막 결과 메시지 (파손 등).</summary>
     public string LastMessage { get; private set; } = string.Empty;
@@ -105,17 +117,17 @@ public class PlayerCombat : MonoBehaviour
         var mouse = Mouse.current;
         if (mouse == null) return;
 
-        bool left = mouse.leftButton.wasPressedThisFrame;
-        bool right = mouse.rightButton.wasPressedThisFrame;
-        if (!left && !right) return;
-
-        // 클릭을 Mouse.current 로 직접 읽기 때문에 uGUI 가 그 클릭을 먹었는지 알 수 없다.
-        // 인벤토리 패널의 우클릭 착용이 공격으로 새지 않게 여기서 걸러낸다.
-        if (IsPointerOverUI()) return;
-
-        // 좌클릭 = 주무기, 우클릭 = 보조무기 (GDD 4항 "우클릭 = 보조 행동").
-        TryAttack(left ? EquipmentSlot.MainHand : EquipmentSlot.OffHand);
+        if (CanAttackFromInput(mouse.leftButton.wasPressedThisFrame, IsAiming))
+            TryAttack();
     }
+
+    public static bool CanAim(bool rightPressed, bool pointerOverUi, bool dead, bool grappled,
+                              bool assassinating, bool reloading) =>
+        rightPressed && !pointerOverUi && !dead && !grappled && !assassinating && !reloading;
+
+    /// <summary>자기검사용 순수 입력 조건. 좌클릭만으로는 공격할 수 없다.</summary>
+    public static bool CanAttackFromInput(bool leftPressedThisFrame, bool isAiming) =>
+        leftPressedThisFrame && isAiming;
 
     static bool IsPointerOverUI() =>
         EventSystem.current && EventSystem.current.IsPointerOverGameObject();
@@ -202,14 +214,11 @@ public class PlayerCombat : MonoBehaviour
     /// <summary>재장전 중인지. HUD 와 공격 차단에 쓴다.</summary>
     public bool IsReloading => Time.time < reloadEndTime;
 
-    void TryAttack(EquipmentSlot hand)
+    void TryAttack()
     {
-        var weaponStack = equipment ? equipment.GetStack(hand) : null;
+        var weaponStack = equipment ? equipment.GetStack(EquipmentSlot.MainHand) : null;
         var weapon = weaponStack != null ? weaponStack.definition : null;
         bool useWeapon = weapon && weapon.attackDamage > 0f;
-
-        // 보조무기 슬롯이 비어 있으면 우클릭은 아무것도 하지 않는다. 맨손은 주무기 쪽만.
-        if (!useWeapon && hand == EquipmentSlot.OffHand) return;
 
         // GDD 11항: 내구도 0 이면 파손 상태로 공격에 쓸 수 없다.
         if (useWeapon && weaponStack.IsBroken)
@@ -220,14 +229,12 @@ public class PlayerCombat : MonoBehaviour
 
         float interval = useWeapon ? weapon.attackInterval : unarmedInterval;
 
-        // 손별로 쿨다운을 따로 둔다 — 주무기와 보조무기를 번갈아 쓸 수 있어야 한다.
-        int handIndex = hand == EquipmentSlot.MainHand ? 0 : 1;
-        if (Time.time < nextAttackTime[handIndex]) return;
+        if (Time.time < nextAttackTime) return;
 
         // 사용자 요구: 다 쏘고 좌클릭하면 알아서 재장전한다. 탄약이 없으면 그때만 경고.
         if (useWeapon && weaponStack.UsesAmmo && weaponStack.loadedAmmo <= 0)
         {
-            if (!TryReload(hand)) LastMessage = weapon.displayName + " 탄약이 없습니다";
+            if (!TryReload(EquipmentSlot.MainHand)) LastMessage = weapon.displayName + " 탄약이 없습니다";
             return;
         }
 
@@ -236,7 +243,7 @@ public class PlayerCombat : MonoBehaviour
 
         if (useWeapon && weaponStack.UsesAmmo) weaponStack.loadedAmmo--;
 
-        nextAttackTime[handIndex] = Time.time + interval;
+        nextAttackTime = Time.time + interval;
         AttackInterval = interval;
         LastAttackTime = Time.time;
 

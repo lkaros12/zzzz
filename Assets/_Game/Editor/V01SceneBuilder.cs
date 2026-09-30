@@ -829,7 +829,7 @@ public static class V01SceneBuilder
     }
 
     /// <summary>
-    /// 하단 중앙 퀵슬롯 바. 앞 두 칸은 주무기/보조무기(장비를 그대로 비춘다), 뒤 세 칸은 소모품.
+    /// 하단 중앙 퀵슬롯 바. 앞 두 칸은 주무기/방패(장비를 그대로 비춘다), 뒤 세 칸은 소모품.
     /// 인벤토리 패널이 꺼져도 남아야 하므로 HUD 캔버스에 붙인다.
     /// </summary>
     static QuickSlotBarUI CreateQuickSlotBar(GameObject canvas, Sprite sprite, GameObject player)
@@ -2315,7 +2315,9 @@ public static class V01SceneBuilder
     {
         var axe = AssetDatabase.LoadAssetAtPath<ItemDefinition>(ItemDataFolder + "/fire_axe.asset");
         Check(axe != null, "손도끼 에셋 존재");
-        Check(axe.equipSlot == EquipmentSlot.OffHand, "한손 손도끼는 보조무기 슬롯");
+        Check(PlayerEquipment.CanEquipTo(EquipmentSlot.MainHand, axe)
+              && !PlayerEquipment.CanEquipTo(EquipmentSlot.OffHand, axe),
+              "한손 손도끼는 주무기 전용");
         Check(axe.attackDamage > 0f, "손도끼에 공격력이 있다");
         Check(axe.attackRange > 1f, "손도끼 사거리");
 
@@ -2324,7 +2326,7 @@ public static class V01SceneBuilder
 
         // 주무기 슬롯은 방어 부위가 없다 — 무기를 들어도 방어력이 붙으면 안 된다.
         Check(PlayerEquipment.PartsCovered(EquipmentSlot.MainHand).Length == 0, "주무기 슬롯은 방어 부위가 없다");
-        Check(PlayerEquipment.PartsCovered(EquipmentSlot.OffHand).Length == 0, "보조무기 슬롯은 방어 부위가 없다");
+        Check(PlayerEquipment.PartsCovered(EquipmentSlot.OffHand).Length == 0, "방패 슬롯은 방어 부위가 없다");
     }
 
     /// <summary>GDD 8항: 사망 시 소지품과 장비가 모두 좀비에게 넘어가고 플레이어는 비어야 한다.</summary>
@@ -3021,20 +3023,72 @@ public static class V01SceneBuilder
             var shield = AssetDatabase.LoadAssetAtPath<ItemDefinition>(ItemDataFolder + "/" + shieldIds[i] + ".asset");
             Check(shield != null, shieldIds[i] + " 에셋 존재");
             Check(shield.isShield, shieldIds[i] + " 은 방패");
-            Check(shield.equipSlot == EquipmentSlot.OffHand, shieldIds[i] + " 은 보조무기 슬롯");
+            Check(shield.equipSlot == EquipmentSlot.OffHand, shieldIds[i] + " 은 방패 슬롯");
             Check(shield.attackDamage <= 0f, shieldIds[i] + " 은 공격력이 없다 (우클릭이 방어여야 한다)");
             Check(shield.maxDurability > 0, shieldIds[i] + " 내구도 있음 (막았을 때만 감소)");
         }
 
         // ---- 슬롯 규칙 (GDD 21항 한손 무기 + 방패 조합) ----
         var lid = AssetDatabase.LoadAssetAtPath<ItemDefinition>(ItemDataFolder + "/trashcan_lid.asset");
-        Check(PlayerEquipment.CanEquipTo(EquipmentSlot.OffHand, lid), "방패는 보조무기 칸에 들어간다");
+        Check(PlayerEquipment.CanEquipTo(EquipmentSlot.OffHand, lid), "방패는 방패 칸에 들어간다");
         Check(!PlayerEquipment.CanEquipTo(EquipmentSlot.MainHand, lid), "방패는 주무기 칸에 못 들어간다");
-        Check(PlayerEquipment.CanEquipTo(EquipmentSlot.MainHand, knife), "한손 무기는 주무기 칸에도 들어간다");
-        Check(PlayerEquipment.CanEquipTo(EquipmentSlot.OffHand, knife), "한손 무기는 보조무기 칸에도 들어간다");
+        Check(PlayerEquipment.CanEquipTo(EquipmentSlot.MainHand, knife), "한손 무기는 주무기 칸에 들어간다");
+        Check(!PlayerEquipment.CanEquipTo(EquipmentSlot.OffHand, knife), "방패 칸은 한손 무기도 거부한다");
         Check(PlayerEquipment.CanEquipTo(EquipmentSlot.MainHand, pistolItem), "총은 주무기 칸");
-        Check(!PlayerEquipment.CanEquipTo(EquipmentSlot.OffHand, pistolItem), "총은 보조무기 칸에 못 들어간다");
-        Check(!PlayerEquipment.CanEquipTo(EquipmentSlot.OffHand, bat), "양손 무기는 보조무기 칸에 못 들어간다");
+        Check(!PlayerEquipment.CanEquipTo(EquipmentSlot.OffHand, pistolItem), "총은 방패 칸에 못 들어간다");
+        Check(!PlayerEquipment.CanEquipTo(EquipmentSlot.OffHand, bat), "양손 무기는 방패 칸에 못 들어간다");
+        Check(PlayerEquipment.CanShareShield(null) && PlayerEquipment.CanShareShield(knife)
+              && !PlayerEquipment.CanShareShield(bat) && !PlayerEquipment.CanShareShield(pistolItem),
+              "방패는 빈손·한손 근접과만 같이 든다");
+
+        var equipmentProbe = new GameObject("__ShieldEquipmentSelfCheck");
+        var filler = ScriptableObject.CreateInstance<ItemDefinition>();
+        try
+        {
+            var inventory = equipmentProbe.AddComponent<PlayerInventory>();
+            var equipment = equipmentProbe.AddComponent<PlayerEquipment>();
+            Inject(equipment, "inventory", inventory);
+
+            inventory.Add(lid, 1);
+            Check(equipment.TryEquip(inventory.GetStack(0))
+                  && equipment.Get(EquipmentSlot.OffHand) == lid,
+                  "방패 TryEquip은 방패 칸에 장착한다");
+
+            inventory.Add(bat, 1);
+            Check(equipment.TryEquip(FindStackById(inventory, bat.id))
+                  && equipment.Get(EquipmentSlot.MainHand) == bat
+                  && equipment.Get(EquipmentSlot.OffHand) == null
+                  && FindStackById(inventory, lid.id) != null,
+                  "방패 상태에서 양손 무기를 들면 방패를 인벤토리로 내린다");
+
+            inventory.Clear();
+            inventory.Add(lid, 1);
+            Check(!equipment.TryEquip(inventory.GetStack(0))
+                  && equipment.Get(EquipmentSlot.OffHand) == null
+                  && equipment.LastMessage.Contains("함께 들 수 없습니다"),
+                  "양손 무기 상태에서 방패 장착을 메시지와 함께 거부한다");
+
+            equipment.StripAll();
+            inventory.Clear();
+            var riot = AssetDatabase.LoadAssetAtPath<ItemDefinition>(ItemDataFolder + "/riot_shield.asset");
+            inventory.Add(riot, 1);
+            Check(equipment.TryEquip(inventory.GetStack(0)), "경찰 방패 장착");
+            inventory.Add(pistolItem, 1);
+            filler.id = "__inventory_filler";
+            filler.maxStack = 1;
+            Check(inventory.Add(filler, 44) == 44, "방패 보관 실패 검증용 인벤토리를 채운다");
+            Check(!equipment.TryEquip(FindStackById(inventory, pistolItem.id))
+                  && equipment.Get(EquipmentSlot.MainHand) == null
+                  && equipment.Get(EquipmentSlot.OffHand) == riot
+                  && FindStackById(inventory, pistolItem.id) != null
+                  && equipment.LastMessage.Contains("방패를 넣을 자리"),
+                  "방패를 내릴 자리가 없으면 원거리 무기 장착을 원상복구한다");
+        }
+        finally
+        {
+            Object.DestroyImmediate(filler);
+            Object.DestroyImmediate(equipmentProbe);
+        }
 
         // ---- 피해가 그대로 들어가는지 (사용자 결정: 좀비 방어력 제거) ----
         var instanceFlags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
@@ -3265,7 +3319,7 @@ public static class V01SceneBuilder
         Check(PlayerQuickSlots.IsWeaponSlot(0) && PlayerQuickSlots.IsWeaponSlot(1), "1·2번은 무기 칸");
         Check(!PlayerQuickSlots.IsWeaponSlot(2), "3번은 소모품 칸");
         Check(PlayerQuickSlots.WeaponSlotFor(0) == EquipmentSlot.MainHand, "1번 = 주무기");
-        Check(PlayerQuickSlots.WeaponSlotFor(1) == EquipmentSlot.OffHand, "2번 = 보조무기");
+        Check(PlayerQuickSlots.WeaponSlotFor(1) == EquipmentSlot.OffHand, "2번 = 방패");
 
         var go = new GameObject("__QuickSlotSelfCheck");
         try
@@ -3285,7 +3339,7 @@ public static class V01SceneBuilder
 
             inventory.Clear();
             inventory.Add(rifle, 1);
-            Check(!slots.TryAssign(1, inventory.GetStack(0)), "총은 보조무기 칸에 못 들어간다");
+            Check(!slots.TryAssign(1, inventory.GetStack(0)), "총은 방패 칸에 못 들어간다");
             Check(!slots.TryAssign(2, inventory.GetStack(0)), "무기는 소모품 칸에 못 들어간다");
 
             inventory.Clear();
@@ -3321,10 +3375,9 @@ public static class V01SceneBuilder
             var weapon = AssetDatabase.LoadAssetAtPath<ItemDefinition>(ItemDataFolder + "/" + ids[i] + ".asset");
             Check(weapon != null, ids[i] + " 에셋 존재");
             Check(weapon.attackDamage > 0f, ids[i] + " 공격력");
-            var expectedSlot = weapon.handedness == WeaponHandedness.TwoHanded
-                ? EquipmentSlot.MainHand
-                : EquipmentSlot.OffHand;
-            Check(weapon.equipSlot == expectedSlot, ids[i] + " 손 구분에 맞는 슬롯");
+            Check(PlayerEquipment.CanEquipTo(EquipmentSlot.MainHand, weapon)
+                  && !PlayerEquipment.CanEquipTo(EquipmentSlot.OffHand, weapon),
+                  ids[i] + " 은 주무기 전용");
             Check(weapon.handedness != WeaponHandedness.None, ids[i] + " 손 구분 지정됨");
             Check(weapon.maxDurability > 0, ids[i] + " 내구도 지정됨");
         }
@@ -3498,29 +3551,115 @@ public static class V01SceneBuilder
 
         var controller = AssetDatabase.LoadAssetAtPath<UnityEditor.Animations.AnimatorController>(PlayerControllerPath);
         Check(controller, "Player.controller가 있다");
-        Check(controller.parameters.Length == 6, "Player.controller 파라미터가 6개다");
+        Check(controller.parameters.Length == 10, "Player.controller 파라미터가 10개다");
         Check(HasParameter(controller, "MoveX", AnimatorControllerParameterType.Float), "플레이어 MoveX 파라미터");
         Check(HasParameter(controller, "MoveZ", AnimatorControllerParameterType.Float), "플레이어 MoveZ 파라미터");
         Check(HasParameter(controller, "Attack", AnimatorControllerParameterType.Trigger), "플레이어 Attack 파라미터");
         Check(HasParameter(controller, "AttackOneHand", AnimatorControllerParameterType.Trigger), "플레이어 AttackOneHand 파라미터");
+        Check(HasParameter(controller, "AttackTwoHand", AnimatorControllerParameterType.Trigger), "플레이어 AttackTwoHand 파라미터");
         Check(HasParameter(controller, "AttackSpeed", AnimatorControllerParameterType.Float), "플레이어 AttackSpeed 파라미터");
+        Check(HasParameter(controller, "AimPose", AnimatorControllerParameterType.Int), "플레이어 AimPose 파라미터");
+        Check(HasParameter(controller, "Fire", AnimatorControllerParameterType.Trigger), "플레이어 Fire 파라미터");
+        Check(HasParameter(controller, "FireSpeed", AnimatorControllerParameterType.Float), "플레이어 FireSpeed 파라미터");
         Check(HasParameter(controller, "Dead", AnimatorControllerParameterType.Bool), "플레이어 Dead 파라미터");
 
+        Check(controller.layers.Length == 2, "플레이어 컨트롤러 레이어가 2개다");
+        var upperLayer = controller.layers[1];
+        Check(upperLayer.name == "UpperBody" && upperLayer.iKPass
+              && upperLayer.blendingMode == UnityEditor.Animations.AnimatorLayerBlendingMode.Override,
+              "UpperBody 레이어가 Override이고 IK Pass가 켜져 있다");
+        var upperMask = AssetDatabase.LoadAssetAtPath<AvatarMask>(PlayerUpperBodyMaskPath);
+        Check(upperMask && upperLayer.avatarMask == upperMask, "UpperBody 레이어에 상체 마스크가 연결됐다");
+        Check(!upperMask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.Root)
+              && upperMask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.Body)
+              && upperMask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.Head)
+              && upperMask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftArm)
+              && upperMask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.RightArm)
+              && upperMask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftFingers)
+              && upperMask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.RightFingers)
+              && upperMask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftHandIK)
+              && upperMask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.RightHandIK)
+              && !upperMask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftLeg)
+              && !upperMask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.RightLeg)
+              && !upperMask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftFootIK)
+              && !upperMask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.RightFootIK),
+              "상체 마스크가 허리 위와 손 IK만 포함한다");
+
+        var pistol = AssetDatabase.LoadAssetAtPath<ItemDefinition>(ItemDataFolder + "/pistol.asset");
+        var rifle = AssetDatabase.LoadAssetAtPath<ItemDefinition>(ItemDataFolder + "/rifle.asset");
+        var shotgun = AssetDatabase.LoadAssetAtPath<ItemDefinition>(ItemDataFolder + "/shotgun.asset");
+        var bow = AssetDatabase.LoadAssetAtPath<ItemDefinition>(ItemDataFolder + "/bow.asset");
+        var knife = AssetDatabase.LoadAssetAtPath<ItemDefinition>(ItemDataFolder + "/kitchen_knife.asset");
+        var bat = AssetDatabase.LoadAssetAtPath<ItemDefinition>(ItemDataFolder + "/baseball_bat.asset");
+        var shield = AssetDatabase.LoadAssetAtPath<ItemDefinition>(ItemDataFolder + "/trashcan_lid.asset");
+        var shieldStack = ItemStack.Create(shield, 1, Vector2Int.zero);
+        Check(bow && PlayerAnimator.AimPoseFor(bow, null) == 0, "활 에셋이 있고 AimPose는 Empty다");
+        Check(PlayerAnimator.AimPoseFor(pistol, null) == 1
+              && PlayerAnimator.AimPoseFor(rifle, null) == 2
+              && PlayerAnimator.AimPoseFor(shotgun, null) == 2
+              && PlayerAnimator.AimPoseFor(null, null) == 3
+              && PlayerAnimator.AimPoseFor(knife, null) == 4
+              && PlayerAnimator.AimPoseFor(bat, null) == 5
+              && PlayerAnimator.AimPoseFor(knife, shieldStack) == 6
+              && PlayerAnimator.AimPoseFor(null, shieldStack) == 6,
+              "AimPose 1~6이 권총/소총/맨손/한손/양손/방패에 매핑된다");
+        shieldStack.durability = 0;
+        Check(PlayerAnimator.AimPoseFor(knife, shieldStack) == 4
+              && PlayerAnimator.AimPoseFor(null, shieldStack) == 3,
+              "파손된 방패는 방패 자세 대신 무기 자세를 쓴다");
+        Check(!PlayerAnimator.ShouldUseUpperBody(false, false, 1, false)
+              && PlayerAnimator.ShouldUseUpperBody(true, false, 1, false)
+              && !PlayerAnimator.ShouldUseUpperBody(true, true, 4, false),
+              "UpperBody는 조준 중에만 켜지고 근접 공격 중에는 꺼진다");
+        Check(!PlayerCombat.CanAttackFromInput(true, false)
+              && PlayerCombat.CanAttackFromInput(true, true),
+              "우클릭 조준 없이 좌클릭 공격이 나가지 않는다");
+        Check(PlayerCombat.CanAim(true, false, false, false, false, false)
+              && !PlayerCombat.CanAim(true, true, false, false, false, false)
+              && !PlayerCombat.CanAim(true, false, true, false, false, false)
+              && !PlayerCombat.CanAim(true, false, false, true, false, false)
+              && !PlayerCombat.CanAim(true, false, false, false, true, false)
+              && !PlayerCombat.CanAim(true, false, false, false, false, true),
+              "CanAim은 UI·사망·붙잡힘·암살·재장전 중 false다");
+
         var states = controller.layers[0].stateMachine.states;
-        Check(states.Length == 4, "플레이어 상태가 4개다");
+        Check(states.Length == 5, "플레이어 기본 레이어 상태가 5개다");
         var locomotionState = FindState(states, "Locomotion");
         Check(locomotionState != null, "Locomotion 상태가 있다");
         var attackState = FindState(states, "Attack");
         var attackOneHandState = FindState(states, "AttackOneHand");
+        var attackTwoHandState = FindState(states, "AttackTwoHand");
         Check(attackState != null, "Attack 상태가 있다");
         Check(attackOneHandState != null, "AttackOneHand 상태가 있다");
+        Check(attackTwoHandState != null, "AttackTwoHand 상태가 있다");
         Check(attackState.speedParameterActive && attackState.speedParameter == "AttackSpeed"
-              && attackOneHandState.speedParameterActive && attackOneHandState.speedParameter == "AttackSpeed",
-              "두 공격 상태의 재생 속도가 AttackSpeed 파라미터를 따른다");
+              && attackOneHandState.speedParameterActive && attackOneHandState.speedParameter == "AttackSpeed"
+              && attackTwoHandState.speedParameterActive && attackTwoHandState.speedParameter == "AttackSpeed",
+              "세 공격 상태의 재생 속도가 AttackSpeed 파라미터를 따른다");
         Check(Mathf.Approximately(PlayerAnimator.CalculateAttackSpeed(1.5f, 0.8f), 1.875f)
               && Mathf.Approximately(PlayerAnimator.CalculateAttackSpeed(1.5f, 2f), 1f),
               "공격 간격에 맞춘 재생 속도를 계산한다");
         Check(FindState(states, "Death") != null, "Death 상태가 있다");
+        var upperStates = upperLayer.stateMachine.states;
+        Check(upperStates.Length == 9, "UpperBody에 조준 7개와 사격 2개 상태가 있다");
+        Check(FindState(upperStates, "Empty") != null
+              && FindState(upperStates, "PistolAim") != null
+              && FindState(upperStates, "RifleAim") != null
+              && FindState(upperStates, "UnarmedAim") != null
+              && FindState(upperStates, "MeleeAimOneHand") != null
+              && FindState(upperStates, "MeleeAimTwoHand") != null
+              && FindState(upperStates, "ShieldBlock") != null
+              && FindState(upperStates, "PistolFire") != null
+              && FindState(upperStates, "RifleFire") != null,
+              "UpperBody에 Empty/조준 6종/사격 상태가 있다");
+        Check(FindState(upperStates, "PistolFire").speedParameterActive
+              && FindState(upperStates, "PistolFire").speedParameter == "FireSpeed"
+              && FindState(upperStates, "RifleFire").speedParameterActive
+              && FindState(upperStates, "RifleFire").speedParameter == "FireSpeed",
+              "두 사격 상태의 재생 속도가 FireSpeed 파라미터를 따른다");
+        Check(FindState(upperStates, "PistolFire").transitions.Length == 7
+              && FindState(upperStates, "RifleFire").transitions.Length == 7,
+              "Fire 중 AimPose가 바뀌면 새 자세로 전이한다");
         var locomotion = locomotionState.motion as UnityEditor.Animations.BlendTree;
         Check(locomotion && locomotion.blendType == UnityEditor.Animations.BlendTreeType.FreeformDirectional2D,
               "Locomotion이 2D Freeform Directional 블렌드 트리다");
@@ -3551,10 +3690,19 @@ public static class V01SceneBuilder
             Check(settings.Length > 0, PlayerClipNames[i] + ": 클립 설정이 있다");
             for (int c = 0; c < settings.Length; c++)
             {
-                Check(settings[c].loopTime == (i < PlayerLocomotionClipCount),
+                Check(settings[c].loopTime == IsPlayerLoopClip(PlayerClipNames[i], i),
                       PlayerClipNames[i] + ": 루프 설정이 맞다");
                 Check(settings[c].lockRootRotation && settings[c].lockRootHeightY && settings[c].lockRootPositionXZ,
                       PlayerClipNames[i] + ": 루트 모션이 꺼져 있다");
+                if (PlayerClipTrimSeconds.TryGetValue(PlayerClipNames[i], out Vector2 trim))
+                {
+                    float sampleRate = importer.importedTakeInfos.Length > 0
+                        ? importer.importedTakeInfos[0].sampleRate : 0f;
+                    Check(sampleRate > 0f
+                          && Mathf.Abs(settings[c].firstFrame - trim.x * sampleRate) <= 1f
+                          && Mathf.Abs(settings[c].lastFrame - trim.y * sampleRate) <= 1f,
+                          PlayerClipNames[i] + ": 절단 구간이 표와 ±1프레임 이내다");
+                }
             }
 
             var clip = LoadPlayerClip(PlayerClipNames[i]);
@@ -3569,10 +3717,14 @@ public static class V01SceneBuilder
                 Check(connected, PlayerClipNames[i] + ": 지정 좌표에 클립이 연결됐다");
             }
             else
-                Check(FindState(states, PlayerClipNames[i]).motion == clip,
+            {
+                var clipStates = i < PlayerLocomotionClipCount + 4 ? states : upperStates;
+                var clipState = FindState(clipStates, PlayerClipNames[i]);
+                Check(clipState != null && clipState.motion == clip,
                       PlayerClipNames[i] + ": 해당 상태에 클립이 연결됐다");
+            }
         }
-        if (missing.Count > 0) Debug.LogWarning("[V0.1] 없는 클립: " + string.Join(", ", missing));
+        Check(missing.Count == 0, "플레이어 클립이 모두 있다: " + string.Join(", ", missing));
 
         CharacterController body = null;
         foreach (var candidate in Object.FindObjectsByType<PlayerStats>(FindObjectsSortMode.None))
@@ -3931,11 +4083,24 @@ public static class V01SceneBuilder
             fieldProbe.transform.rotation = Quaternion.LookRotation(Vector3.forward);
             var field = fieldProbe.AddComponent<VisionField>();
             var fieldAim = fieldProbe.AddComponent<PlayerAim>();
+            float flashlightRange = field.Range;
+            Inject(field, "flashlightRange", flashlightRange);
             field.Refresh();
 
             Check(field.Facing == fieldAim.AimDirection, "정면 방향이 마우스 조준 방향을 따른다");
             Check(Mathf.Abs(field.Origin.y - 1.15f) <= 0.05f,
                   "VisionField 눈높이가 지면 기준 1.15m ± 0.05m다");
+            field.SetFlashlight(false);
+            Check(Mathf.Approximately(field.Range, 0.9f)
+                  && Mathf.Approximately(field.FlashlightRange, flashlightRange),
+                  "실제 VisionField에서 손전등을 끄면 시야만 0.9m로 줄어든다");
+            field.SetFlashlight(true);
+            Check(Mathf.Approximately(field.Range, flashlightRange),
+                  "실제 VisionField에서 손전등을 켜면 원래 시야로 복원된다");
+            Check(!VisionField.CanToggleFlashlight(true, true, false)
+                  && !VisionField.CanToggleFlashlight(true, false, true)
+                  && VisionField.CanToggleFlashlight(true, false, false),
+                  "사망·인벤토리 열림 중에는 F 토글을 무시한다");
 
             float front = FarthestVisible(field, Vector3.forward);
             float insideCone = FarthestVisible(field, Quaternion.Euler(0f, 55f, 0f) * Vector3.forward);
@@ -4923,12 +5088,24 @@ public static class V01SceneBuilder
     const string PlayerTextureFolder = PlayerCharacterFolder + "/Textures";
     const string PlayerMaterialFolder = PlayerCharacterFolder + "/Materials";
     const string PlayerControllerPath = AnimationFolder + "/Player.controller";
+    const string PlayerUpperBodyMaskPath = AnimationFolder + "/PlayerUpperBody.mask";
     const float PlayerHeight = 1.2f;
     const int PlayerLocomotionClipCount = 9;
     static readonly string[] PlayerClipNames =
     {
         "Idle", "Walk", "Run", "WalkBack", "WalkLeft", "WalkRight",
-        "RunBack", "RunLeft", "RunRight", "Attack", "AttackOneHand", "Death"
+        "RunBack", "RunLeft", "RunRight", "Attack", "AttackOneHand", "AttackTwoHand", "Death",
+        "PistolAim", "PistolFire", "RifleAim", "RifleFire",
+        "UnarmedAim", "MeleeAimOneHand", "MeleeAimTwoHand", "ShieldBlock"
+    };
+    // 초 단위 절단 구간. FBX 실제 샘플레이트로 프레임을 계산한다.
+    static readonly System.Collections.Generic.Dictionary<string, Vector2> PlayerClipTrimSeconds = new()
+    {
+        { "Attack", new Vector2(0.25f, 1.10f) },
+        { "AttackOneHand", new Vector2(0.30f, 1.05f) },
+        { "AttackTwoHand", new Vector2(0.55f, 1.20f) },
+        { "PistolFire", new Vector2(0.00f, 0.80f) },
+        { "RifleFire", new Vector2(0.00f, 0.60f) }
     };
     static readonly Vector2[] PlayerLocomotionPositions =
     {
@@ -5019,13 +5196,24 @@ public static class V01SceneBuilder
             }
             for (int c = 0; c < clips.Length; c++)
             {
-                bool loop = i < PlayerLocomotionClipCount;
+                bool loop = IsPlayerLoopClip(PlayerClipNames[i], i);
                 clipChanged |= clips[c].loopTime != loop || !clips[c].lockRootRotation
                                || !clips[c].lockRootHeightY || !clips[c].lockRootPositionXZ;
                 clips[c].loopTime = loop;
                 clips[c].lockRootRotation = true;
                 clips[c].lockRootHeightY = true;
                 clips[c].lockRootPositionXZ = true;
+                if (PlayerClipTrimSeconds.TryGetValue(PlayerClipNames[i], out Vector2 trim)
+                    && clipImporter.importedTakeInfos.Length > 0)
+                {
+                    float sampleRate = clipImporter.importedTakeInfos[0].sampleRate;
+                    float firstFrame = trim.x * sampleRate;
+                    float lastFrame = trim.y * sampleRate;
+                    clipChanged |= !Mathf.Approximately(clips[c].firstFrame, firstFrame)
+                                   || !Mathf.Approximately(clips[c].lastFrame, lastFrame);
+                    clips[c].firstFrame = firstFrame;
+                    clips[c].lastFrame = lastFrame;
+                }
             }
             if (clipChanged)
             {
@@ -5043,6 +5231,10 @@ public static class V01SceneBuilder
         EnsurePlayerMaterials(model);
         return model;
     }
+
+    static bool IsPlayerLoopClip(string name, int index) =>
+        index < PlayerLocomotionClipCount || name == "PistolAim" || name == "RifleAim"
+        || name == "UnarmedAim" || name.StartsWith("MeleeAim") || name == "ShieldBlock";
 
     static void EnsurePlayerMaterials(GameObject model)
     {
@@ -5181,24 +5373,65 @@ public static class V01SceneBuilder
         }
     }
 
+    static AvatarMask EnsurePlayerUpperBodyMask()
+    {
+        var mask = AssetDatabase.LoadAssetAtPath<AvatarMask>(PlayerUpperBodyMaskPath);
+        if (!mask)
+        {
+            mask = new AvatarMask();
+            AssetDatabase.CreateAsset(mask, PlayerUpperBodyMaskPath);
+        }
+        for (int i = 0; i < (int)AvatarMaskBodyPart.LastBodyPart; i++)
+            mask.SetHumanoidBodyPartActive((AvatarMaskBodyPart)i, false);
+        AvatarMaskBodyPart[] upperBody =
+        {
+            AvatarMaskBodyPart.Body, AvatarMaskBodyPart.Head,
+            AvatarMaskBodyPart.LeftArm, AvatarMaskBodyPart.RightArm,
+            AvatarMaskBodyPart.LeftFingers, AvatarMaskBodyPart.RightFingers,
+            AvatarMaskBodyPart.LeftHandIK, AvatarMaskBodyPart.RightHandIK
+        };
+        for (int i = 0; i < upperBody.Length; i++) mask.SetHumanoidBodyPartActive(upperBody[i], true);
+        EditorUtility.SetDirty(mask);
+        return mask;
+    }
+
     static UnityEditor.Animations.AnimatorController EnsurePlayerController()
     {
         Directory.CreateDirectory(AnimationFolder);
         var attack = LoadPlayerClip("Attack");
         var attackOneHand = LoadPlayerClip("AttackOneHand");
+        var attackTwoHand = LoadPlayerClip("AttackTwoHand");
         var death = LoadPlayerClip("Death");
+        var pistolAim = LoadPlayerClip("PistolAim");
+        var pistolFire = LoadPlayerClip("PistolFire");
+        var rifleAim = LoadPlayerClip("RifleAim");
+        var rifleFire = LoadPlayerClip("RifleFire");
+        var unarmedAim = LoadPlayerClip("UnarmedAim");
+        var meleeAimOneHand = LoadPlayerClip("MeleeAimOneHand");
+        var meleeAimTwoHand = LoadPlayerClip("MeleeAimTwoHand");
+        var shieldBlock = LoadPlayerClip("ShieldBlock");
 
         var controller = AssetDatabase.LoadAssetAtPath<UnityEditor.Animations.AnimatorController>(PlayerControllerPath);
         if (!controller)
             controller = UnityEditor.Animations.AnimatorController.CreateAnimatorControllerAtPath(PlayerControllerPath);
+        for (int i = controller.layers.Length - 1; i > 0; i--) controller.RemoveLayer(i);
         for (int i = controller.parameters.Length - 1; i >= 0; i--) controller.RemoveParameter(i);
         controller.AddParameter("MoveX", AnimatorControllerParameterType.Float);
         controller.AddParameter("MoveZ", AnimatorControllerParameterType.Float);
         controller.AddParameter("Attack", AnimatorControllerParameterType.Trigger);
         controller.AddParameter("AttackOneHand", AnimatorControllerParameterType.Trigger);
+        controller.AddParameter("AttackTwoHand", AnimatorControllerParameterType.Trigger);
         controller.AddParameter(new AnimatorControllerParameter
         {
             name = "AttackSpeed",
+            type = AnimatorControllerParameterType.Float,
+            defaultFloat = 1f
+        });
+        controller.AddParameter("AimPose", AnimatorControllerParameterType.Int);
+        controller.AddParameter("Fire", AnimatorControllerParameterType.Trigger);
+        controller.AddParameter(new AnimatorControllerParameter
+        {
+            name = "FireSpeed",
             type = AnimatorControllerParameterType.Float,
             defaultFloat = 1f
         });
@@ -5237,11 +5470,15 @@ public static class V01SceneBuilder
         attackOneHandState.motion = attackOneHand;
         attackOneHandState.speedParameter = "AttackSpeed";
         attackOneHandState.speedParameterActive = true;
+        var attackTwoHandState = machine.AddState("AttackTwoHand");
+        attackTwoHandState.motion = attackTwoHand;
+        attackTwoHandState.speedParameter = "AttackSpeed";
+        attackTwoHandState.speedParameterActive = true;
         var deathState = machine.AddState("Death");
         deathState.motion = death;
         machine.defaultState = locomotionState;
 
-        var attackStates = new[] { attackState, attackOneHandState };
+        var attackStates = new[] { attackState, attackOneHandState, attackTwoHandState };
         for (int i = 0; i < attackStates.Length; i++)
         {
             var attackClip = attackStates[i].motion;
@@ -5267,6 +5504,77 @@ public static class V01SceneBuilder
         revive.hasExitTime = false;
         revive.duration = 0.08f;
         revive.AddCondition(UnityEditor.Animations.AnimatorConditionMode.IfNot, 0f, "Dead");
+
+        controller.AddLayer("UpperBody");
+        layers = controller.layers;
+        layers[1].avatarMask = EnsurePlayerUpperBodyMask();
+        layers[1].blendingMode = UnityEditor.Animations.AnimatorLayerBlendingMode.Override;
+        layers[1].defaultWeight = 0f;
+        layers[1].iKPass = true;
+        controller.layers = layers;
+
+        var upperMachine = controller.layers[1].stateMachine;
+        var emptyState = upperMachine.AddState("Empty");
+        var pistolAimState = upperMachine.AddState("PistolAim");
+        pistolAimState.motion = pistolAim;
+        var rifleAimState = upperMachine.AddState("RifleAim");
+        rifleAimState.motion = rifleAim;
+        var unarmedAimState = upperMachine.AddState("UnarmedAim");
+        unarmedAimState.motion = unarmedAim;
+        var meleeAimOneHandState = upperMachine.AddState("MeleeAimOneHand");
+        meleeAimOneHandState.motion = meleeAimOneHand;
+        var meleeAimTwoHandState = upperMachine.AddState("MeleeAimTwoHand");
+        meleeAimTwoHandState.motion = meleeAimTwoHand;
+        var shieldBlockState = upperMachine.AddState("ShieldBlock");
+        shieldBlockState.motion = shieldBlock;
+        var pistolFireState = upperMachine.AddState("PistolFire");
+        pistolFireState.motion = pistolFire;
+        pistolFireState.speedParameter = "FireSpeed";
+        pistolFireState.speedParameterActive = true;
+        var rifleFireState = upperMachine.AddState("RifleFire");
+        rifleFireState.motion = rifleFire;
+        rifleFireState.speedParameter = "FireSpeed";
+        rifleFireState.speedParameterActive = true;
+        upperMachine.defaultState = emptyState;
+
+        var poseStates = new[]
+        {
+            emptyState, pistolAimState, rifleAimState, unarmedAimState,
+            meleeAimOneHandState, meleeAimTwoHandState, shieldBlockState
+        };
+        for (int from = 0; from < poseStates.Length; from++)
+        for (int to = 0; to < poseStates.Length; to++)
+        {
+            if (from == to) continue;
+            var transition = poseStates[from].AddTransition(poseStates[to]);
+            transition.hasExitTime = false;
+            transition.duration = 0.05f;
+            transition.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Equals, to, "AimPose");
+        }
+
+        var aimStates = new[] { pistolAimState, rifleAimState };
+        var fireStates = new[] { pistolFireState, rifleFireState };
+        for (int i = 0; i < aimStates.Length; i++)
+        {
+            var toFire = aimStates[i].AddTransition(fireStates[i]);
+            toFire.hasExitTime = false;
+            toFire.duration = 0.03f;
+            toFire.AddCondition(UnityEditor.Animations.AnimatorConditionMode.If, 0f, "Fire");
+
+            var fireDone = fireStates[i].AddTransition(aimStates[i]);
+            fireDone.hasExitTime = true;
+            fireDone.exitTime = 0.95f;
+            fireDone.duration = 0.05f;
+
+            for (int to = 0; to < poseStates.Length; to++)
+            {
+                if (to == i + 1) continue;
+                var poseChanged = fireStates[i].AddTransition(poseStates[to]);
+                poseChanged.hasExitTime = false;
+                poseChanged.duration = 0.05f;
+                poseChanged.AddCondition(UnityEditor.Animations.AnimatorConditionMode.Equals, to, "AimPose");
+            }
+        }
 
         AssetDatabase.SaveAssets();
         return controller;

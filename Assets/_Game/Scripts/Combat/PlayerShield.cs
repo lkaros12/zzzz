@@ -1,14 +1,7 @@
 using UnityEngine;
-using UnityEngine.EventSystems;
-using UnityEngine.InputSystem;
 
 /// <summary>
-/// GDD 21항 방패. 보조무기 슬롯에 방패가 있으면 우클릭이 공격 대신 방어 자세가 된다.
-///
-/// 슬롯 충돌 해결: 기획서 14항에는 방패 전용 슬롯이 없고, 사용자 요구로 우클릭은 이미
-/// 보조무기 공격이다. 그래서 방패도 보조무기 슬롯에 넣고, 슬롯에 든 물건이 방패면 방어,
-/// 한손 무기면 공격으로 갈린다. 대신 한손 무기를 주무기 칸에도 넣을 수 있게 해서
-/// "한손 무기 + 방패" 조합(21항 반격) 이 가능하다.
+/// GDD 21항 방패. 방패 슬롯에 장착하고 우클릭 조준으로 방어 자세를 취한다.
 /// </summary>
 public class PlayerShield : MonoBehaviour
 {
@@ -23,6 +16,7 @@ public class PlayerShield : MonoBehaviour
     PlayerGrapple grapple;
     PlayerAssassinate assassinate;
     PlayerAim aim;
+    PlayerCombat combat;
 
     float readyAgainAt;
 
@@ -39,9 +33,10 @@ public class PlayerShield : MonoBehaviour
         grapple = GetComponent<PlayerGrapple>();
         assassinate = GetComponent<PlayerAssassinate>();
         aim = GetComponent<PlayerAim>();
+        combat = GetComponent<PlayerCombat>();
     }
 
-    /// <summary>보조무기 슬롯에 든 방패. 없으면 null.</summary>
+    /// <summary>방패 슬롯에 든 방패. 없으면 null.</summary>
     public ItemStack ShieldStack
     {
         get
@@ -73,11 +68,7 @@ public class PlayerShield : MonoBehaviour
         if (assassinate && assassinate.IsAssassinating) return; // GDD 19항: 암살 중에는 다른 동작 없음
         if (IsRecovering) return;
 
-        var mouse = Mouse.current;
-        if (mouse == null || !mouse.rightButton.isPressed) return;
-
-        // 인벤토리 우클릭(착용) 이 방어 자세로 새지 않게 한다.
-        if (EventSystem.current && EventSystem.current.IsPointerOverGameObject()) return;
+        if (!combat || !combat.IsAiming || combat.IsAttacking) return;
 
         IsBlocking = true;
     }
@@ -90,7 +81,7 @@ public class PlayerShield : MonoBehaviour
     /// </summary>
     public bool TryBlock(Vector3 attackerPosition, float impact)
     {
-        if (!IsBlocking) return false;
+        if (!IsBlocking || (combat && combat.IsAttacking)) return false;
 
         // 후딜 검사를 여기서도 한다. Update 만 믿으면 같은 프레임 안의 호출 순서에 따라 뚫린다.
         if (IsRecovering) return false;
