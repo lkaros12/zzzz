@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 86ec9df7-57ce-43e0-a0d8-b8b95818bebd
-  modified: 2026-09-29T01:34:38.427Z
+  modified: 2026-10-01T01:42:31.504Z
 ---
 
 zzzz 프로젝트에서 캐릭터 애니메이션을 넣는 경로는 "블렌더 액션 → 뼈만 든 FBX → 유니티 Humanoid 리타기팅" 이다. 믹사모 클립도 똑같은 경로를 탄다.
@@ -22,5 +22,7 @@ zzzz 프로젝트에서 캐릭터 애니메이션을 넣는 경로는 "블렌더
 또 Human 자동 매핑이 머리카락 본(`Hair_Side_L_01`)을 **LeftEye** 로 잡아 "Copied Avatar Rig Configuration mis-match" 가 난다 → 모델 아바타에서 LeftEye/RightEye/Jaw 매핑을 비운다.
 
 **함정 4 — FBX 내장 텍스처 추출.** `ModelImporter.ExtractTextures` 가 **확장자 없는** 파일(`Image_0_001`, 실제로는 PNG)을 만들어 무한 재임포트 경고가 나고, `.png` 를 붙여도 **TextureCube 로** 들어와 `LoadAssetAtPath<Texture2D>` 가 null 이다. 확장자 복구 + `textureShape = Texture2D` 둘 다 필요.
+
+**함정 5 — 발목이 꺾인다 = 클립 아바타 기준 자세가 첫 프레임 (2026-10-01).** Without Skin FBX 는 바인드 포즈가 없어 CreateFromThisModel 아바타가 첫 애니 프레임을 T-포즈로 삼는다. 리타기팅이 그 차이를 실어 왼발이 원본보다 최대 26° 더 꺾였다. 해결: 클립 importer.humanDescription.skeleton 의 mixamorig 뼈 회전·위치를 모델(character01) 아바타의 skeleton 값으로 덮어쓰기 (빌더 `ApplyModelTPose`, Avatar Configure 의 자세 바로잡기와 같은 효과). 확인법: 클립 FBX 프리팹 기본 자세(=첫 프레임)의 발목 각도와, 같은 클립을 모델에 SampleAnimationClip(t=0) 한 각도가 같아야 한다 (고친 뒤 0~1°).
 
 **How to apply:** 새 클립을 추가할 때 `Assets/_Game/Art/Characters/zombi1@<이름>.fbx` 로 내보내고, 빌더의 `CheckZombieModelAndAnimation` 이 검사하는 임포트 설정 4개(Human / CopyFromOther / sourceAvatar / preserveHierarchy) 를 맞춘다. 관련: [[unity-playmode-frame-ticks]]
