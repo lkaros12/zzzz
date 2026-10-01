@@ -3751,6 +3751,11 @@ public static class V01SceneBuilder
                   PlayerClipNames[i] + ": 자체 아바타를 만든다");
             Check(!importer.sourceAvatar, PlayerClipNames[i] + ": 원본 아바타가 없다");
             Check(importer.importedTakeInfos.Length > 0, PlayerClipNames[i] + ": 클립이 1개 이상이다");
+            // 기준 자세가 첫 프레임이면 발목이 꺾여 보인다 (ApplyModelTPose 참고). 읽기 전용으로 대조한다.
+            var tPoseProbe = (ModelImporter)AssetImporter.GetAtPath(path);
+            var modelAvatar = AssetDatabase.LoadAssetAtPath<Avatar>(PlayerModelPath);
+            Check(modelAvatar && !ApplyModelTPose(tPoseProbe, modelAvatar.humanDescription.skeleton),
+                  PlayerClipNames[i] + ": 클립 아바타 기준 자세가 모델 T-포즈와 같다");
 
             var settings = importer.clipAnimations;
             if (settings.Length == 0) settings = importer.defaultClipAnimations;
@@ -5255,6 +5260,42 @@ public static class V01SceneBuilder
         new[] { "material_0.002", "Image_0_003.png", "Image_1_003.png" }
     };
 
+    /// <summary>
+    /// Mixamo "Without Skin" 클립 FBX 에는 바인드 포즈가 없어서, 자체 아바타가 첫 프레임 자세
+    /// (달리기 도중 등)를 T-포즈로 착각한다. 리타기팅은 그 기준과의 차이를 그대로 옮기므로
+    /// 왼발이 원본보다 최대 26° 더 꺾였다 (실측). Avatar Configure 의 기준 자세 바로잡기를
+    /// 코드로 한다 — 클립 아바타의 mixamorig 뼈 기준 자세를 모델의 실제 T-포즈로 바꾼다.
+    /// 바뀐 게 있으면 true (호출 쪽이 다시 들여온다).
+    /// </summary>
+    static bool ApplyModelTPose(ModelImporter clipImporter, SkeletonBone[] modelSkeleton)
+    {
+        var tPose = new System.Collections.Generic.Dictionary<string, SkeletonBone>();
+        for (int i = 0; i < modelSkeleton.Length; i++) tPose[modelSkeleton[i].name] = modelSkeleton[i];
+
+        var description = clipImporter.humanDescription;
+        var skeleton = description.skeleton;
+        if (skeleton == null) return false;
+
+        bool changed = false;
+        for (int i = 0; i < skeleton.Length; i++)
+        {
+            if (!skeleton[i].name.StartsWith("mixamorig:")) continue;
+            if (!tPose.TryGetValue(skeleton[i].name, out SkeletonBone pose)) continue;
+            if (Quaternion.Angle(skeleton[i].rotation, pose.rotation) < 0.01f
+                && (skeleton[i].position - pose.position).sqrMagnitude < 1e-8f) continue;
+
+            skeleton[i].rotation = pose.rotation;
+            skeleton[i].position = pose.position;
+            skeleton[i].scale = pose.scale;
+            changed = true;
+        }
+        if (!changed) return false;
+
+        description.skeleton = skeleton;
+        clipImporter.humanDescription = description;
+        return true;
+    }
+
     static GameObject EnsurePlayerModelAndAnimation()
     {
         var importer = AssetImporter.GetAtPath(PlayerModelPath) as ModelImporter;
@@ -5316,6 +5357,9 @@ public static class V01SceneBuilder
             clipImporter.preserveHierarchy = true;
             clipImporter.importAnimation = true;
             if (rigChanged) clipImporter.SaveAndReimport();
+
+            clipImporter = (ModelImporter)AssetImporter.GetAtPath(path);
+            if (ApplyModelTPose(clipImporter, avatar.humanDescription.skeleton)) clipImporter.SaveAndReimport();
 
             clipImporter = (ModelImporter)AssetImporter.GetAtPath(path);
             var clips = clipImporter.clipAnimations;
