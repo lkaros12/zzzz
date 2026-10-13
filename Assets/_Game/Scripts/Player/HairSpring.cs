@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>애니메이션 뒤에 7가닥 머리카락 본을 가볍게 흔든다.</summary>
+[DefaultExecutionOrder(-200)]
 public class HairSpring : MonoBehaviour
 {
     [SerializeField] float stiffness = 80f;
@@ -128,6 +129,14 @@ public class HairSpring : MonoBehaviour
         lastRootPosition = transform.position;
         ResetPoints();
         return true;
+    }
+
+    public void ResetSimulation()
+    {
+        if (!Initialize()) return;
+        for (int i = 0; i < bones.Length; i++) bones[i].localRotation = referenceRotations[i];
+        lastRootPosition = transform.position;
+        ResetPoints();
     }
 
     void ResetPoints()

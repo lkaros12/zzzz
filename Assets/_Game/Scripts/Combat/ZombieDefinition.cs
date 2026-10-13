@@ -22,9 +22,9 @@ public class ZombieDefinition : ScriptableObject
     [Tooltip("모델에 씌울 애니메이터. 파라미터: Speed(float) / Attack(trigger) / Dead(bool)")]
     public RuntimeAnimatorController animatorController;
     [Tooltip("콜라이더 높이. 플레이어 히트스캔이 이 높이를 훑으므로 너무 낮으면 총이 안 맞는다")]
-    public float bodyHeight = 1.6f;
+    public float bodyHeight = 1.2f;
     [Tooltip("콜라이더 반지름. bodyHeight 의 절반을 넘을 수 없다")]
-    public float bodyRadius = 0.4f;
+    public float bodyRadius = 0.26f;
     [Tooltip("모델을 bodyHeight 에 맞추는 배율. 빌더가 모델 실측 높이로 계산해 박아둔다")]
     public float modelScale = 1f;
     [Tooltip("사망 애니메이션이 끝날 때까지 시체를 남겨두는 시간. 0 이면 즉시 사라진다")]

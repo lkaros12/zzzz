@@ -138,6 +138,9 @@ public class VisionFog : MonoBehaviour
 
     public void Bind(VisionField visionField) => field = visionField;
 
+    void OnEnable() { if (quad) quad.gameObject.SetActive(true); }
+    void OnDisable() { if (quad) quad.gameObject.SetActive(false); }
+
     void OnDestroy()
     {
         if (material) Destroy(material);

@@ -2673,6 +2673,23 @@ public static class V01SceneBuilder
               "패널이 열려 있으면 휠이 맵 줌으로 새지 않는다");
         Check(typeof(InventoryUI).GetProperty("IsOpen") != null, "InventoryUI 가 열림 상태를 노출한다");
 
+        // ---- C1: 줌 범위 1.5~14, 임시 1인칭(V) ----
+        var zoomProbe = new GameObject("__ZoomProbe").AddComponent<IsometricCamera>();
+        try
+        {
+            var zoomSo = new SerializedObject(zoomProbe);
+            Check(Mathf.Approximately(zoomSo.FindProperty("minZoom").floatValue, 1.5f)
+                  && Mathf.Approximately(zoomSo.FindProperty("maxZoom").floatValue, 14f), "줌 범위가 1.5~14 다");
+        }
+        finally { Object.DestroyImmediate(zoomProbe.gameObject); }
+        Check(cameraSource.Contains("AddComponent<FirstPersonView>()"), "카메라가 1인칭(V) 컴포넌트를 붙인다");
+        var firstPersonOff = FirstPersonView.ComponentsToDisable(true);
+        Check(System.Array.IndexOf(firstPersonOff, typeof(VisionFog)) >= 0
+              && System.Array.IndexOf(firstPersonOff, typeof(WallFader)) >= 0
+              && System.Array.IndexOf(firstPersonOff, typeof(IsometricCamera)) >= 0,
+              "1인칭은 위에서 보는 전용 효과(시야 덮개·벽 흐림·등각 카메라)를 끈다");
+        Check(FirstPersonView.ComponentsToDisable(false).Length == 0, "등각으로 돌아오면 끄는 것이 없다");
+
         // ---- 컨테이너에 넣는 경로가 있는지 ----
         Check(typeof(WorldContainer).GetMethod("PutFrom") != null, "컨테이너에 아이템을 넣을 수 있다");
         Check(typeof(NearbyItemsUI).GetMethod("ContainsScreenPoint") != null,
@@ -4032,6 +4049,10 @@ public static class V01SceneBuilder
             Check(Mathf.Abs(visual.localScale.x - types[0].modelScale) < 0.001f, "모델 배율이 적용됐다");
             Check(Mathf.Abs(visual.localPosition.y + types[0].bodyHeight * 0.5f) < 0.001f,
                   "모델 발이 콜라이더 밑면에 맞았다");
+            // 사용자 결정(C1): 좀비 키를 플레이어와 같게 1.2m. 눈은 플레이어처럼 지면 1.15m 라
+            // 키가 줄어도 창턱(0.9)·조리대(0.95) 너머를 본다.
+            Check(Mathf.Abs(types[0].bodyHeight - 1.2f) < 0.001f, "좀비 키가 1.2m 다");
+            Check(Mathf.Abs(cc.height * 0.5f + Vision.EyeOffset - 1.15f) < 0.05f, "좀비 눈높이가 지면 1.15m 다");
 
             Check(!spawned.transform.Find("Face"), "모델 좀비에는 플레이스홀더 얼굴(Face) 을 붙이지 않는다");
             Check(spawned.GetComponent<ZombieAnimator>(), "ZombieAnimator 가 붙었다");

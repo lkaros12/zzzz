@@ -13,9 +13,9 @@ public class IsometricCamera : MonoBehaviour
     [Header("줌 (Orthographic Size)")]
     // 9 면 지면 49x36m 가 보여서 방 하나가 화면의 1/10 이 된다 (실측). 좀보이드 정도로 당긴다.
     [SerializeField] float zoom = 5.5f;
-    [SerializeField] float minZoom = 3f;
+    [SerializeField] float minZoom = 1.5f;
     [Tooltip("맵이 60x60 이라 18 까지 빼면 바닥 끝과 그 밖 빈 공간이 보인다. 맵이 커지면 올린다")]
-    [SerializeField] float maxZoom = 9f;
+    [SerializeField] float maxZoom = 14f;
     [SerializeField] float zoomStep = 1.5f;
     [SerializeField] float zoomLerpSpeed = 12f;
 
@@ -45,6 +45,9 @@ public class IsometricCamera : MonoBehaviour
         fader.SetTarget(target);
 
         if (!GetComponent<VisionFog>()) gameObject.AddComponent<VisionFog>();
+        var firstPerson = GetComponent<FirstPersonView>();
+        if (!firstPerson) firstPerson = gameObject.AddComponent<FirstPersonView>();
+        firstPerson.SetTarget(target);
     }
 
     void LateUpdate()
@@ -74,5 +77,7 @@ public class IsometricCamera : MonoBehaviour
 
         var fader = GetComponent<WallFader>();
         if (fader) fader.SetTarget(newTarget);
+        var firstPerson = GetComponent<FirstPersonView>();
+        if (firstPerson) firstPerson.SetTarget(newTarget);
     }
 }

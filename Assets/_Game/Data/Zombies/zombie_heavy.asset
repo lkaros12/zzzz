@@ -18,9 +18,9 @@ MonoBehaviour:
   placeholderMaterial: {fileID: 2100000, guid: aef9c7319d633d34286a579b2d183b22, type: 2}
   model: {fileID: 919132149155446097, guid: ab453a6e02d6cac49992731a407314f3, type: 3}
   animatorController: {fileID: 9100000, guid: c9b95ab2e13ecaf4a9f17ab6263de631, type: 2}
-  bodyHeight: 1.6
+  bodyHeight: 1.2
   bodyRadius: 0.3
-  modelScale: 1.6015759
+  modelScale: 1.201182
   deathLinger: 1.1
   maxHealth: 220
   moveSpeed: 1.5

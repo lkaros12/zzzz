@@ -172,6 +172,14 @@ public class WallSegment : MonoBehaviour
         enabled = true;
     }
 
+    // 1인칭 진입 때 즉시 불투명하게 만들고, 복귀 때 저장한 알파를 되돌린다.
+    public void RestoreAlpha(float value)
+    {
+        alpha = value;
+        requested = false;
+        Apply();
+    }
+
     void LateUpdate()
     {
         float target = requested ? hiddenAlpha : 1f;

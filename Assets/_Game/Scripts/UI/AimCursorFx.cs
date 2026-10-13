@@ -153,6 +153,9 @@ public class AimCursorFx : MonoBehaviour
             if (pieces[i]) pieces[i].gameObject.SetActive(false);
     }
 
+    void OnEnable() { if (root) root.gameObject.SetActive(true); }
+    void OnDisable() { if (root) root.gameObject.SetActive(false); }
+
     void OnDestroy()
     {
         if (root) Destroy(root.gameObject);

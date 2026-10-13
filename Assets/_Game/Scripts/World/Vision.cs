@@ -15,7 +15,7 @@ public static class Vision
     /// <summary>
     /// 좀비 CharacterController 중심에서 눈까지의 높이.
     /// </summary>
-    public const float EyeOffset = 0.3f;
+    public const float EyeOffset = 1.15f - 1.2f * 0.5f;
     public const float PlayerEyeOffset = 0.5f;
 
     static int blockerMask;

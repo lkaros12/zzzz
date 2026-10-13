@@ -13,6 +13,7 @@ public class PlayerAim : MonoBehaviour
     [Tooltip("커서 레이가 닿는 최대 거리. 총 사거리보다 넉넉하게 둔다")]
     [SerializeField] float maxAimDistance = 200f;
 
+    FirstPersonView firstPerson;
     PlayerGrapple grapple;
     PlayerStats stats;
     PlayerAssassinate assassinate;
@@ -53,11 +54,14 @@ public class PlayerAim : MonoBehaviour
         var mouse = Mouse.current;
         if (mouse == null) return;
 
-        if (!TryResolveAimPoint(mouse.position.ReadValue(), out var point)) return;
+        if (!firstPerson) firstPerson = aimCamera.GetComponent<FirstPersonView>();
+        bool eyeView = firstPerson && firstPerson.IsFirstPerson;
+        Vector2 screenPosition = eyeView ? (Vector2)aimCamera.pixelRect.center : mouse.position.ReadValue();
+        if (!TryResolveAimPoint(screenPosition, out var point)) return;
 
         AimPoint = point;
 
-        Vector3 flat = point - transform.position;
+        Vector3 flat = eyeView ? aimCamera.transform.forward : point - transform.position;
         flat.y = 0f;
         if (flat.sqrMagnitude < 0.01f) return;
 
@@ -82,7 +86,7 @@ public class PlayerAim : MonoBehaviour
         {
             var collider = hitBuffer[i].collider;
             if (!collider) continue;
-            if (collider.transform == transform) continue; // 내 몸은 조준 대상이 아니다
+            if (collider.transform == transform || collider.transform.IsChildOf(transform)) continue; // 내 몸은 조준 대상이 아니다
 
             if (hitBuffer[i].distance < bestDistance) { bestDistance = hitBuffer[i].distance; best = i; }
         }
@@ -92,6 +96,14 @@ public class PlayerAim : MonoBehaviour
             point = hitBuffer[best].point;
             AimNormal = hitBuffer[best].normal;
             AimHitSurface = true;
+            return true;
+        }
+
+        if (firstPerson && firstPerson.IsFirstPerson)
+        {
+            point = ray.GetPoint(maxAimDistance);
+            AimNormal = -ray.direction;
+            AimHitSurface = false;
             return true;
         }
 
