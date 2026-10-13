@@ -32,6 +32,15 @@ public class WallSegment : MonoBehaviour
     [SerializeField] Material[] fadeMaterials;
     [SerializeField] bool exterior;
     [SerializeField] Room[] roofRooms;
+    [SerializeField] AssetMaterialSet[] assetMaterials;
+
+    [System.Serializable]
+    class AssetMaterialSet
+    {
+        public Material[] opaque;
+        public Material[] fade;
+        [System.NonSerialized] public bool faded;
+    }
 
     MaterialPropertyBlock block;
     Material[] roofOpaqueMaterials;
@@ -165,6 +174,17 @@ public class WallSegment : MonoBehaviour
         alpha = 1f;
     }
 
+    /// <summary>도시 에셋 한 채를 한 조각으로 묶는다. 기존 별장 바인딩은 그대로 둔다.</summary>
+    public void BindAssetVisuals(Renderer[] renderers, Material[][] fades)
+    {
+        targets = renderers;
+        exterior = true;
+        assetMaterials = new AssetMaterialSet[renderers.Length];
+        for (int i = 0; i < renderers.Length; i++)
+            assetMaterials[i] = new AssetMaterialSet { opaque = renderers[i].sharedMaterials, fade = fades[i] };
+        alpha = 1f;
+    }
+
     /// <summary>이번 프레임에 이 벽이 플레이어를 가리고 있다. 매 프레임 다시 불러야 한다.</summary>
     public void RequestFade()
     {
@@ -196,9 +216,42 @@ public class WallSegment : MonoBehaviour
         if (Mathf.Approximately(alpha, 1f)) enabled = false;
     }
 
+    void ApplyAssetMaterials()
+    {
+        bool transparent = IsFaded;
+        if (block == null) block = new MaterialPropertyBlock();
+        for (int i = 0; i < targets.Length; i++)
+        {
+            var renderer = targets[i];
+            if (!renderer) continue;
+            var set = assetMaterials[i];
+            if (set.faded != transparent)
+            {
+                renderer.sharedMaterials = transparent ? set.fade : set.opaque;
+                set.faded = transparent;
+            }
+            for (int slot = 0; slot < set.opaque.Length; slot++)
+            {
+                if (!transparent) { renderer.SetPropertyBlock(null, slot); continue; }
+                block.Clear();
+                renderer.GetPropertyBlock(block, slot);
+                Color color = set.fade[slot].color;
+                color.a = alpha;
+                block.SetColor(BaseColorId, color);
+                block.SetColor(ColorId, color);
+                renderer.SetPropertyBlock(block, slot);
+            }
+        }
+    }
+
     void Apply()
     {
         if (targets == null) return;
+        if (assetMaterials != null && assetMaterials.Length > 0)
+        {
+            ApplyAssetMaterials();
+            return;
+        }
 
         bool transparent = IsFaded;
         if (block == null) block = new MaterialPropertyBlock();

@@ -24,6 +24,14 @@ public static class HadanCityBuilder
     const string SignTexturePath = DataFolder + "/hadan_sign_blocks.asset";
     const string DigitTexturePath = DataFolder + "/hadan_digits.asset";
     const string DataStableKey = "HadanCityBuilder.DataFilesStable";
+    const bool UseAssetBuildings = true;
+    const string BuildingPackFolder = "Assets/_Game/Art/Buildings/Pack";
+    const string AssetMaterialFolder = DataFolder + "/AssetMaterials";
+    const string AssetMaterialFilesKey = "HadanCityBuilder.AssetMaterialFiles";
+    const string AssetMaterialRebuildsKey = "HadanCityBuilder.AssetMaterialRebuilds";
+    const float MaxAssetDistortion = 1.6f;
+    // 임포트 캐시의 간판 면 법선 (0,-1,0)에 FBX 루트 X=-90°를 적용해 +Z를 확인했다.
+    static readonly Vector3 AssetFront = Vector3.forward;
 
     const double CenterLat = 35.10625;
     const double CenterLon = 128.96675;
@@ -60,19 +68,21 @@ public static class HadanCityBuilder
     [MenuItem("Tools/V0.1/Build Hadan Pilot")]
     public static void BuildHadanPilot()
     {
-        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-
         MapData map;
+        AssetModel[] assetModels;
         try
         {
             map = LoadMap();
+            assetModels = UseAssetBuildings ? LoadAssetModels() : null;
+            if (UseAssetBuildings) AssetBuildingPlans(map, RoadInfos(map), assetModels, out _);
         }
         catch (Exception exception)
         {
-            Debug.LogError("[Hadan] 지도 데이터를 읽지 못했습니다: " + exception.Message);
+            Debug.LogError("[Hadan] 지도·건물 에셋을 읽지 못했습니다: " + exception.Message);
             return;
         }
 
+        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         Directory.CreateDirectory(SceneFolder);
         Directory.CreateDirectory(DataFolder);
         int dataFilesBefore = CountDataFiles();
@@ -88,7 +98,7 @@ public static class HadanCityBuilder
 
         CreateGround(map, groundMaterial);
         var meshes = new List<Mesh>();
-        var buildings = CreateBuildings(map, roads, detailMaterials, meshes, counts,
+        var buildings = CreateBuildings(map, roads, detailMaterials, meshes, counts, assetModels,
             out int buildingCount, out float maxHeight, out int stairBuildings,
             out int firstFloorOnly, out int totalFloors, out BuildingFloors floorVisibility);
         int roadCount = CreateRoads(roads, roadMaterial, meshes);
@@ -98,7 +108,7 @@ public static class HadanCityBuilder
         var clock = V01SceneBuilder.CreateGameClock();
         var player = V01SceneBuilder.CreatePlayer();
         player.transform.position = new Vector3(spawn.x, player.transform.position.y, spawn.y);
-        floorVisibility.SetTarget(player.transform);
+        if (floorVisibility) floorVisibility.SetTarget(player.transform);
         UnityEngine.Object.DestroyImmediate(player.GetComponent<DebugStartState>());
         var arrival = new GameObject("Arrive_FromEstate");
         arrival.transform.position = player.transform.position;
@@ -106,14 +116,18 @@ public static class HadanCityBuilder
         V01SceneBuilder.CreateCamera(player.transform);
         V01SceneBuilder.CreateHud(player, clock);
 
-        var doorObstacles = floorVisibility.GetComponentsInChildren<NavMeshObstacle>(true);
+        var doorObstacles = floorVisibility ? floorVisibility.GetComponentsInChildren<NavMeshObstacle>(true)
+            : Array.Empty<NavMeshObstacle>();
         for (int i = 0; i < doorObstacles.Length; i++) doorObstacles[i].enabled = false;
         var watch = Stopwatch.StartNew();
         V01SceneBuilder.BuildNavMesh();
         watch.Stop();
-        floorVisibility.BuiltDoorNavMeshSamples = CheckDoorNavMesh(floorVisibility, out int checkedDoors);
-        floorVisibility.BuiltCheckedDoors = checkedDoors;
-        floorVisibility.BuiltStairPaths = CheckBuildingPaths(floorVisibility);
+        if (floorVisibility)
+        {
+            floorVisibility.BuiltDoorNavMeshSamples = CheckDoorNavMesh(floorVisibility, out int checkedDoors);
+            floorVisibility.BuiltCheckedDoors = checkedDoors;
+            floorVisibility.BuiltStairPaths = CheckBuildingPaths(floorVisibility);
+        }
         for (int i = 0; i < doorObstacles.Length; i++) doorObstacles[i].enabled = true;
 
         AssetDatabase.DeleteAsset(MeshAssetPath);
@@ -121,6 +135,7 @@ public static class HadanCityBuilder
         for (int i = 0; i < meshes.Count; i++) StoreMesh(meshes[i]);
         AssetDatabase.SaveAssets();
         EditorPrefs.SetBool(DataStableKey, dataFilesBefore == CountDataFiles());
+        if (UseAssetBuildings) RecordAssetMaterialFiles();
         EditorSceneManager.SaveScene(scene, ScenePath);
         V01SceneBuilder.EnsureBuildScenes();
         int triangles = CountUniqueMeshTriangles();
@@ -140,6 +155,13 @@ public static class HadanCityBuilder
                   + ", GameObject " + gameObjects.ToString("N0")
                   + ", 삼각형 " + triangles.ToString("N0")
                   + ", 최고 " + maxHeight.ToString("F1") + "m, NavMesh " + watch.ElapsedMilliseconds + "ms");
+        if (UseAssetBuildings)
+            Debug.Log("[Hadan Asset] bld_00=" + counts.assets[0] + ", bld_01=" + counts.assets[1]
+                + ", bld_02=" + counts.assets[2] + ", bld_03=" + counts.assets[3] + ", bld_04=" + counts.assets[4]
+                + ", shop_1=" + counts.assets[5] + ", shop_2=" + counts.assets[6] + ", shop_4=" + counts.assets[7]
+                + ", 가게 앞면 " + counts.shopfronts + ", 왜곡 잘림 " + counts.clippedAssets
+                + ", 건너뜀 " + counts.skippedAssets
+                + ", 인스턴스 삼각형 " + CountInstanceMeshTriangles().ToString("N0"));
         if (watch.ElapsedMilliseconds > 180000)
             Debug.LogWarning("[Hadan] NavMesh 굽기가 3분을 넘었습니다: " + watch.ElapsedMilliseconds + "ms");
     }
@@ -167,50 +189,57 @@ public static class HadanCityBuilder
         int failures = 0;
         int expectedBuildings = CountBuildings(map);
         var root = GameObject.Find("Buildings");
+        float maxHeight = float.PositiveInfinity;
+        var polygons = UseAssetBuildings ? AssetBuildingPolygons(root ? root.transform : null) : BuildingPolygons(map);
         var floorVisibility = root ? root.GetComponent<BuildingFloors>() : null;
-        int actualBuildings = floorVisibility != null && floorVisibility.Buildings != null
-            ? floorVisibility.Buildings.Count : 0;
-        int tolerance = Mathf.CeilToInt(expectedBuildings * 0.05f);
-        Check(Mathf.Abs(actualBuildings - expectedBuildings) <= tolerance,
-            "건물 수 " + actualBuildings + "/" + expectedBuildings + " (±5%)", ref failures);
-
-        int missingColliders = floorVisibility ? 0 : expectedBuildings;
-        int badFaces = floorVisibility ? 0 : 1;
-        int loggedBadFaces = 0;
-        float maxHeight = floorVisibility ? 0f : float.PositiveInfinity;
-        var polygons = BuildingPolygons(map);
-        if (floorVisibility)
+        if (UseAssetBuildings)
+            CheckAssetBuildings(map, root ? root.transform : null, out maxHeight, ref failures);
+        else
         {
-            for (int i = 0; i < floorVisibility.Buildings.Count; i++)
+            maxHeight = floorVisibility ? 0f : float.PositiveInfinity;
+            int actualBuildings = floorVisibility != null && floorVisibility.Buildings != null
+                ? floorVisibility.Buildings.Count : 0;
+            int tolerance = Mathf.CeilToInt(expectedBuildings * 0.05f);
+            Check(Mathf.Abs(actualBuildings - expectedBuildings) <= tolerance,
+                "건물 수 " + actualBuildings + "/" + expectedBuildings + " (±5%)", ref failures);
+
+            int missingColliders = floorVisibility ? 0 : expectedBuildings;
+            int badFaces = floorVisibility ? 0 : 1;
+            int loggedBadFaces = 0;
+            if (floorVisibility)
             {
-                var entry = floorVisibility.Buildings[i];
-                for (int floor = 0; floor < entry.floors.Length; floor++)
-                    if (!entry.floors[floor] || !entry.floors[floor].GetComponent<MeshCollider>())
+                for (int i = 0; i < floorVisibility.Buildings.Count; i++)
+                {
+                    var entry = floorVisibility.Buildings[i];
+                    for (int floor = 0; floor < entry.floors.Length; floor++)
+                        if (!entry.floors[floor] || !entry.floors[floor].GetComponent<MeshCollider>())
+                            missingColliders++;
+                    var roofCollider = entry.roof ? entry.roof.GetComponent<MeshCollider>() : null;
+                    var roofFilter = entry.roof ? entry.roof.GetComponent<MeshFilter>() : null;
+                    if (!roofCollider || !roofCollider.sharedMesh || !roofFilter || !roofFilter.sharedMesh)
                         missingColliders++;
-                var roofCollider = entry.roof ? entry.roof.GetComponent<MeshCollider>() : null;
-                var roofFilter = entry.roof ? entry.roof.GetComponent<MeshFilter>() : null;
-                if (!roofCollider || !roofCollider.sharedMesh || !roofFilter || !roofFilter.sharedMesh)
-                    missingColliders++;
-                else
-                    maxHeight = Mathf.Max(maxHeight, roofFilter.sharedMesh.bounds.max.y - RailingHeight);
+                    else
+                        maxHeight = Mathf.Max(maxHeight, roofFilter.sharedMesh.bounds.max.y - RailingHeight);
 
-                var structure = entry.root.GetComponentsInChildren<MeshFilter>(true);
-                var polygon = new List<Vector2>(entry.polygon);
-                for (int part = 0; part < structure.Length; part++)
-                    if (structure[part].name.StartsWith("Floor_", StringComparison.Ordinal)
-                        || structure[part].name.StartsWith("ExteriorWall_", StringComparison.Ordinal)
-                        || structure[part].name.StartsWith("Stair_", StringComparison.Ordinal)
-                        || structure[part].name == "Roof")
-                        badFaces += CountBadFaces(structure[part].sharedMesh, structure[part].name,
-                            polygon, ref loggedBadFaces);
+                    var structure = entry.root.GetComponentsInChildren<MeshFilter>(true);
+                    var polygon = new List<Vector2>(entry.polygon);
+                    for (int part = 0; part < structure.Length; part++)
+                        if (structure[part].name.StartsWith("Floor_", StringComparison.Ordinal)
+                            || structure[part].name.StartsWith("ExteriorWall_", StringComparison.Ordinal)
+                            || structure[part].name.StartsWith("Stair_", StringComparison.Ordinal)
+                            || structure[part].name == "Roof")
+                            badFaces += CountBadFaces(structure[part].sharedMesh, structure[part].name,
+                                polygon, ref loggedBadFaces);
+                }
             }
-        }
 
-        Check(missingColliders == 0, "모든 층·지붕에 MeshCollider가 있다", ref failures);
-        Check(badFaces == 0, "층·외벽·계단·지붕 면의 법선이 올바르다", ref failures);
-        CheckBuildingProps(floorVisibility, ref failures);
-        CheckFloorLocator(floorVisibility, ref failures);
-        CheckHadanDetails(map, root ? root.transform : null, polygons, ref failures);
+            Check(missingColliders == 0, "모든 층·지붕에 MeshCollider가 있다", ref failures);
+            Check(badFaces == 0, "층·외벽·계단·지붕 면의 법선이 올바르다", ref failures);
+            CheckBuildingProps(floorVisibility, ref failures);
+            CheckFloorLocator(floorVisibility, ref failures);
+            CheckHadanDetails(map, root ? root.transform : null, polygons, ref failures);
+
+        }
 
         var player = GameObject.Find("Player");
         bool spawnClear = false;
@@ -265,13 +294,16 @@ public static class HadanCityBuilder
         Check(navTriangles > 0, "NavMesh가 구워져 있다 (삼각형 " + navTriangles + ")", ref failures);
         int pathTargets = player ? CheckRoadPaths(map, player.transform.position) : 0;
         Check(pathTargets >= 3, "15~50m 도로점 경로 " + pathTargets + "개가 이어진다", ref failures);
-        int doorNavMeshSamples = floorVisibility ? floorVisibility.BuiltDoorNavMeshSamples : 0;
-        int checkedDoors = floorVisibility ? floorVisibility.BuiltCheckedDoors : 0;
-        Check(checkedDoors == 20 && doorNavMeshSamples == checkedDoors,
-            "문 중심 0.2m 안에 NavMesh가 있다 (" + doorNavMeshSamples + "/" + checkedDoors + ")", ref failures);
-        int stairPaths = floorVisibility ? floorVisibility.BuiltStairPaths : 0;
-        Check(stairPaths >= Mathf.Min(5, CountStairBuildings(floorVisibility)),
-            "1층 문 앞→꼭대기 층 경로 " + stairPaths + "채가 이어진다", ref failures);
+        if (!UseAssetBuildings)
+        {
+            int doorNavMeshSamples = floorVisibility ? floorVisibility.BuiltDoorNavMeshSamples : 0;
+            int checkedDoors = floorVisibility ? floorVisibility.BuiltCheckedDoors : 0;
+            Check(checkedDoors == 20 && doorNavMeshSamples == checkedDoors,
+                "문 중심 0.2m 안에 NavMesh가 있다 (" + doorNavMeshSamples + "/" + checkedDoors + ")", ref failures);
+            int stairPaths = floorVisibility ? floorVisibility.BuiltStairPaths : 0;
+            Check(stairPaths >= Mathf.Min(5, CountStairBuildings(floorVisibility)),
+                "1층 문 앞→꼭대기 층 경로 " + stairPaths + "채가 이어진다", ref failures);
+        }
 
         int triangles = CountUniqueMeshTriangles();
         Debug.Log("[Hadan Check] 씬 전체 고유 메쉬 삼각형 " + triangles.ToString("N0"));
@@ -389,6 +421,16 @@ public static class HadanCityBuilder
 
     static DetailMaterials CreateDetailMaterials()
     {
+        if (UseAssetBuildings)
+            return new DetailMaterials
+            {
+                wire = HadanMaterial("hadan_wire", new Color(0.055f, 0.055f, 0.05f)),
+                trunk = HadanMaterial("hadan_tree_trunk", new Color(0.28f, 0.18f, 0.10f)),
+                leaves = HadanMaterial("hadan_tree_leaves", new Color(0.18f, 0.34f, 0.16f)),
+                pole = HadanMaterial("hadan_utility_pole", new Color(0.25f, 0.25f, 0.24f)),
+                car = HadanMaterial("hadan_abandoned_car", new Color(0.28f, 0.23f, 0.20f)),
+                carRoof = HadanMaterial("hadan_abandoned_car_roof", new Color(0.18f, 0.18f, 0.17f))
+            };
         // 왜: 유형별 창 형태와 줄눈을 텍스처에 함께 구우면 셰이더와 건물별 머티리얼을 늘리지 않는다.
         var commercialTile = EnsureTexture(BuildingTexturePath, 64, 64, (x, y) =>
             y >= 16 && y < 48 ? new Color(0.14f, 0.22f, 0.28f)
@@ -574,12 +616,398 @@ public static class HadanCityBuilder
         V01SceneBuilder.MarkStatic(ground.transform);
     }
 
+    static AssetModel[] LoadAssetModels()
+    {
+        string[] names = { "hadan_bld_00", "hadan_bld_01", "hadan_bld_02", "hadan_bld_03", "hadan_bld_04",
+            "hadan_shop_1", "hadan_shop_2", "hadan_shop_4" };
+        var assets = new AssetModel[names.Length];
+        for (int i = 0; i < names.Length; i++)
+        {
+            string path = BuildingPackFolder + "/" + names[i] + ".fbx";
+            var model = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (!model) throw new InvalidOperationException("건물 에셋이 없습니다: " + path);
+            var bounds = ModelBounds(model.transform, model.transform.parent);
+            if (bounds.size.x <= Epsilon || bounds.size.y <= Epsilon || bounds.size.z <= Epsilon)
+                throw new InvalidOperationException("건물 에셋 크기가 유효하지 않습니다: " + path);
+            assets[i] = new AssetModel { model = model, bounds = bounds, path = path };
+        }
+        if (!Shader.Find("Universal Render Pipeline/Lit"))
+            throw new InvalidOperationException("URP Lit 셰이더가 없습니다.");
+        return assets;
+    }
+
+    // FBX 루트의 X=-90° 회전도 포함하되, 부모 좌표계의 X·Y·Z 크기를 구한다.
+    static Bounds ModelBounds(Transform model, Transform relativeTo)
+    {
+        var bounds = new Bounds();
+        bool first = true;
+        foreach (var filter in model.GetComponentsInChildren<MeshFilter>(true))
+        {
+            if (!filter.sharedMesh) continue;
+            var meshBounds = filter.sharedMesh.bounds;
+            var matrix = relativeTo ? relativeTo.worldToLocalMatrix * filter.transform.localToWorldMatrix
+                : filter.transform.localToWorldMatrix;
+            for (int corner = 0; corner < 8; corner++)
+            {
+                var point = meshBounds.center + Vector3.Scale(meshBounds.extents,
+                    new Vector3((corner & 1) == 0 ? -1 : 1, (corner & 2) == 0 ? -1 : 1,
+                        (corner & 4) == 0 ? -1 : 1));
+                point = matrix.MultiplyPoint3x4(point);
+                if (first) { bounds = new Bounds(point, Vector3.zero); first = false; }
+                else bounds.Encapsulate(point);
+            }
+        }
+        return bounds;
+    }
+
+    static BuildingBox MinimumBuildingBox(List<Vector2> polygon)
+    {
+        var best = new BuildingBox();
+        float bestArea = float.PositiveInfinity;
+        for (int edge = 0; edge < polygon.Count; edge++)
+        {
+            Vector2 direction = polygon[(edge + 1) % polygon.Count] - polygon[edge];
+            if (direction.sqrMagnitude <= Epsilon * Epsilon) continue;
+            direction.Normalize();
+            Vector2 perpendicular = new Vector2(-direction.y, direction.x);
+            Vector2 min = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
+            Vector2 max = new Vector2(float.NegativeInfinity, float.NegativeInfinity);
+            for (int i = 0; i < polygon.Count; i++)
+            {
+                var point = new Vector2(Vector2.Dot(polygon[i], direction), Vector2.Dot(polygon[i], perpendicular));
+                min = Vector2.Min(min, point);
+                max = Vector2.Max(max, point);
+            }
+            Vector2 size = max - min;
+            float area = size.x * size.y;
+            if (area >= bestArea) continue;
+            bestArea = area;
+            best = new BuildingBox
+            {
+                center = direction * ((min.x + max.x) * 0.5f) + perpendicular * ((min.y + max.y) * 0.5f),
+                forward = perpendicular, width = size.x, depth = size.y
+            };
+        }
+        if (best.width <= Epsilon || best.depth <= Epsilon)
+            throw new InvalidOperationException("건물 OBB가 유효하지 않습니다.");
+        return best;
+    }
+
+    static Vector2 NearestRoadDirection(Vector2 center, List<RoadInfo> roads)
+    {
+        Vector2 nearest = default;
+        float bestDistance = float.PositiveInfinity;
+        for (int road = 0; road < roads.Count; road++)
+            for (int i = 0; i + 1 < roads[road].points.Count; i++)
+            {
+                Vector2 from = roads[road].points[i];
+                Vector2 segment = roads[road].points[i + 1] - from;
+                float t = segment.sqrMagnitude <= Epsilon * Epsilon ? 0f
+                    : Mathf.Clamp01(Vector2.Dot(center - from, segment) / segment.sqrMagnitude);
+                Vector2 point = from + segment * t;
+                float distance = (point - center).sqrMagnitude;
+                if (distance >= bestDistance) continue;
+                nearest = point;
+                bestDistance = distance;
+            }
+        if (float.IsPositiveInfinity(bestDistance) || bestDistance <= Epsilon * Epsilon)
+            throw new InvalidOperationException("가장 가까운 도로의 방향을 정할 수 없습니다: " + center);
+        return (nearest - center).normalized;
+    }
+
+    static BuildingBox FaceNearestRoad(BuildingBox box, List<RoadInfo> roads)
+    {
+        Vector2 toRoad = NearestRoadDirection(box.center, roads);
+        Vector2 right = new Vector2(box.forward.y, -box.forward.x);
+        if (Mathf.Abs(Vector2.Dot(toRoad, right)) > Mathf.Abs(Vector2.Dot(toRoad, box.forward)))
+        {
+            float width = box.width;
+            box.width = box.depth;
+            box.depth = width;
+            box.forward = Vector2.Dot(toRoad, right) >= 0f ? right : -right;
+        }
+        else if (Vector2.Dot(toRoad, box.forward) < 0f) box.forward = -box.forward;
+        return box;
+    }
+
+    static int SelectBuildingAsset(BuildingKind kind, BuildingBox box, AssetModel[] assets, long id)
+    {
+        int[] candidates = kind == BuildingKind.Commercial ? new[] { 0, 2 }
+            : kind == BuildingKind.MixedUse ? new[] { 1, 3, 0 }
+            : kind == BuildingKind.House ? new[] { 4, 3 } : new[] { 0 };
+        int start = RoadRandom(id, 71).Next(candidates.Length);
+        int best = candidates[start];
+        float bestDistortion = float.PositiveInfinity;
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            int candidate = candidates[(start + i) % candidates.Length];
+            Vector3 size = assets[candidate].bounds.size;
+            float sx = box.width / size.x;
+            float sz = box.depth / size.z;
+            float distortion = Mathf.Max(sx / sz, sz / sx);
+            if (distortion >= bestDistortion) continue;
+            best = candidate;
+            bestDistortion = distortion;
+        }
+        return best;
+    }
+
+    static Vector3 FitBuildingAsset(BuildingBox box, Vector3 nativeSize, float height, out bool clipped)
+    {
+        float sx = box.width / nativeSize.x;
+        float sz = box.depth / nativeSize.z;
+        clipped = sx > sz * MaxAssetDistortion || sz > sx * MaxAssetDistortion;
+        // 균일 확대는 허용하고, 더 늘어난 축만 줄여 비워 둔다.
+        if (sx > sz * MaxAssetDistortion) sx = sz * MaxAssetDistortion;
+        if (sz > sx * MaxAssetDistortion) sz = sx * MaxAssetDistortion;
+        return new Vector3(sx, height / nativeSize.y, sz);
+    }
+
+    static List<AssetBuildingPlan> AssetBuildingPlans(MapData map, List<RoadInfo> roads, AssetModel[] assets, out int skipped)
+    {
+        var plans = new List<AssetBuildingPlan>();
+        skipped = 0;
+        foreach (var element in map.elements)
+        {
+            if (element.tags == null || string.IsNullOrEmpty(element.tags.building)) continue;
+            var polygon = MakePolygon(element.geometry);
+            if (polygon == null)
+            {
+                Debug.LogWarning("[Hadan Asset] 건물 " + element.id + "의 외곽선이 유효하지 않아 건너뜁니다.");
+                skipped++;
+                continue;
+            }
+            float area = Mathf.Abs(SignedArea(polygon)) / (CityScale * CityScale);
+            int floors = FloorCount(element.tags, area);
+            var kind = ClassifyBuilding(element.tags, polygon, floors, area, roads);
+            var box = MinimumBuildingBox(polygon);
+            try { box = FaceNearestRoad(box, roads); }
+            catch (InvalidOperationException exception)
+            {
+                Debug.LogWarning("[Hadan Asset] 건물 " + element.id + "을 건너뜁니다: " + exception.Message);
+                skipped++;
+                continue;
+            }
+            int asset = SelectBuildingAsset(kind, box, assets, element.id);
+            float height = floors * FloorHeight;
+            Vector3 scale = FitBuildingAsset(box, assets[asset].bounds.size, height, out bool clipped);
+            box.width = assets[asset].bounds.size.x * scale.x;
+            box.depth = assets[asset].bounds.size.z * scale.z;
+            plans.Add(new AssetBuildingPlan { id = element.id, kind = kind, box = box, asset = asset,
+                height = height, scale = scale, clipped = clipped });
+        }
+        return plans;
+    }
+
+    static List<Vector2> BuildingBoxPolygon(BuildingBox box)
+    {
+        Vector2 front = box.forward * (box.depth * 0.5f);
+        Vector2 side = new Vector2(box.forward.y, -box.forward.x) * (box.width * 0.5f);
+        return new List<Vector2> { box.center - side - front, box.center - side + front,
+            box.center + side + front, box.center + side - front };
+    }
+
+    static string AssetMaterialKey(Material source)
+    {
+        if (!source || !AssetDatabase.TryGetGUIDAndLocalFileIdentifier(source, out string guid, out long localId))
+            throw new InvalidOperationException("원본 에셋 재질 식별자가 없습니다.");
+        return guid + "_" + localId.ToString(CultureInfo.InvariantCulture);
+    }
+
+    static Dictionary<Material, AssetMaterialPair> CreateAssetMaterials(AssetModel[] assets)
+    {
+        if (!AssetDatabase.IsValidFolder(AssetMaterialFolder)) AssetDatabase.CreateFolder(DataFolder, "AssetMaterials");
+        var result = new Dictionary<Material, AssetMaterialPair>();
+        foreach (var asset in assets)
+            foreach (var source in AssetDatabase.LoadAllAssetsAtPath(asset.path))
+            {
+                if (!(source is Material material) || result.ContainsKey(material)) continue;
+                string key = AssetMaterialKey(material);
+                var opaque = AssetDatabase.LoadAssetAtPath<Material>(AssetMaterialFolder + "/" + key + "_opaque.mat");
+                if (!opaque)
+                {
+                    opaque = new Material(Shader.Find("Universal Render Pipeline/Lit")) { name = key + "_opaque" };
+                    AssetDatabase.CreateAsset(opaque, AssetMaterialFolder + "/" + key + "_opaque.mat");
+                }
+                opaque.CopyPropertiesFromMaterial(material);
+                opaque.shader = Shader.Find("Universal Render Pipeline/Lit");
+                opaque.name = key + "_opaque";
+                opaque.mainTexture = material.mainTexture;
+                opaque.mainTextureScale = material.mainTextureScale;
+                opaque.mainTextureOffset = material.mainTextureOffset;
+                opaque.color = material.color;
+                opaque.SetFloat("_Surface", 0f);
+                opaque.SetFloat("_AlphaClip", 0f);
+                opaque.SetFloat("_SrcBlend", (float)BlendMode.One);
+                opaque.SetFloat("_DstBlend", (float)BlendMode.Zero);
+                opaque.SetFloat("_ZWrite", 1f);
+                opaque.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                opaque.DisableKeyword("_ALPHATEST_ON");
+                opaque.SetOverrideTag("RenderType", "Opaque");
+                opaque.SetShaderPassEnabled("ShadowCaster", true);
+                opaque.renderQueue = (int)RenderQueue.Geometry;
+                opaque.enableInstancing = true;
+                var fade = AssetDatabase.LoadAssetAtPath<Material>(AssetMaterialFolder + "/" + key + "_fade.mat");
+                if (!fade)
+                {
+                    fade = new Material(opaque) { name = key + "_fade" };
+                    AssetDatabase.CreateAsset(fade, AssetMaterialFolder + "/" + key + "_fade.mat");
+                }
+                fade.CopyPropertiesFromMaterial(opaque);
+                fade.shader = opaque.shader;
+                fade.name = key + "_fade";
+                MakeTransparent(fade);
+                EditorUtility.SetDirty(opaque);
+                EditorUtility.SetDirty(fade);
+                result.Add(material, new AssetMaterialPair { opaque = opaque, fade = fade });
+            }
+        return result;
+    }
+
+    static Transform CreateAssetVisual(Transform parent, string name, AssetModel asset, Vector3 scale,
+        Vector3 bottomCenter, Dictionary<Material, AssetMaterialPair> materials)
+    {
+        var visual = new GameObject(name).transform;
+        visual.SetParent(parent, false);
+        visual.localScale = scale;
+        Vector3 sourceBottomCenter = new Vector3(asset.bounds.center.x, asset.bounds.min.y, asset.bounds.center.z);
+        visual.localPosition = bottomCenter - Vector3.Scale(sourceBottomCenter, scale);
+        var model = (GameObject)PrefabUtility.InstantiatePrefab(asset.model, visual);
+        model.transform.localPosition = asset.model.transform.localPosition;
+        model.transform.localRotation = asset.model.transform.localRotation;
+        model.transform.localScale = asset.model.transform.localScale;
+        foreach (var collider in model.GetComponentsInChildren<Collider>(true)) UnityEngine.Object.DestroyImmediate(collider);
+        foreach (var renderer in model.GetComponentsInChildren<Renderer>(true))
+        {
+            Material[] shared = renderer.sharedMaterials;
+            for (int slot = 0; slot < shared.Length; slot++) shared[slot] = materials[shared[slot]].opaque;
+            renderer.sharedMaterials = shared;
+        }
+        foreach (var transform in model.GetComponentsInChildren<Transform>(true)) transform.gameObject.layer = 0;
+        return visual;
+    }
+
+    static List<List<Vector2>> CreateAssetBuildings(MapData map, List<RoadInfo> roads, Transform root,
+        AssetModel[] assets, PropCounts counts, out int count, out float maxHeight)
+    {
+        var plans = AssetBuildingPlans(map, roads, assets, out counts.skippedAssets);
+        var materials = CreateAssetMaterials(assets);
+        var fades = new Dictionary<Material, Material>();
+        foreach (var pair in materials.Values) fades.Add(pair.opaque, pair.fade);
+        var polygons = new List<List<Vector2>>(plans.Count);
+        maxHeight = 0f;
+        foreach (var plan in plans)
+        {
+            var building = new GameObject("Building_" + plan.id).transform;
+            building.SetParent(root, false);
+            building.position = new Vector3(plan.box.center.x, 0f, plan.box.center.y);
+            building.rotation = Quaternion.LookRotation(new Vector3(plan.box.forward.x, 0f, plan.box.forward.y), Vector3.up)
+                * Quaternion.Inverse(Quaternion.LookRotation(AssetFront, Vector3.up));
+            var collider = building.gameObject.AddComponent<BoxCollider>();
+            collider.center = Vector3.up * (plan.height * 0.5f);
+            collider.size = new Vector3(plan.box.width, plan.height, plan.box.depth);
+            // 콜라이더를 수집하는 기존 굽기에서 지붕 보행면만 제외한다.
+            var modifier = building.gameObject.AddComponent<Unity.AI.Navigation.NavMeshModifier>();
+            modifier.overrideArea = true;
+            modifier.area = NavMesh.GetAreaFromName("Not Walkable");
+            CreateAssetVisual(building, "AssetVisual", assets[plan.asset], plan.scale, Vector3.zero, materials);
+            if (plan.asset != 0 && (plan.kind == BuildingKind.MixedUse || plan.kind == BuildingKind.House)
+                && plan.box.width >= 4f)
+            {
+                int shopIndex = 5 + RoadRandom(plan.id, 73).Next(3);
+                var shop = assets[shopIndex];
+                int shopCount = plan.box.width >= shop.bounds.size.x * 2f ? 2 : 1;
+                float width = Mathf.Min(shop.bounds.size.x, plan.box.width / shopCount);
+                Vector3 shopScale = new Vector3(width / shop.bounds.size.x, FloorHeight / shop.bounds.size.y, 1f);
+                for (int i = 0; i < shopCount; i++)
+                {
+                    // 두께는 건물 안에 묻고, 앞쪽 경계만 외벽보다 5cm 돌출시킨다.
+                    Vector3 position = new Vector3((i - (shopCount - 1) * 0.5f) * width, 0f,
+                        plan.box.depth * 0.5f + 0.05f - shop.bounds.size.z * 0.5f);
+                    CreateAssetVisual(building, "Shopfront_" + i, shop, shopScale, position, materials);
+                    counts.shopfronts++;
+                    counts.assets[shopIndex]++;
+                }
+            }
+            var renderers = building.GetComponentsInChildren<Renderer>(true);
+            var fadeSets = new Material[renderers.Length][];
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                Material[] shared = renderers[i].sharedMaterials;
+                fadeSets[i] = new Material[shared.Length];
+                for (int slot = 0; slot < shared.Length; slot++) fadeSets[i][slot] = fades[shared[slot]];
+            }
+            building.gameObject.AddComponent<WallSegment>().BindAssetVisuals(renderers, fadeSets);
+            polygons.Add(BuildingBoxPolygon(plan.box));
+            counts.types[(int)plan.kind]++;
+            counts.assets[plan.asset]++;
+            if (plan.clipped) counts.clippedAssets++;
+            maxHeight = Mathf.Max(maxHeight, plan.height);
+        }
+        V01SceneBuilder.MarkStatic(root);
+        count = plans.Count;
+        return polygons;
+    }
+
+    static Dictionary<long, List<Vector2>> AssetBuildingPolygons(Transform root)
+    {
+        var result = new Dictionary<long, List<Vector2>>();
+        if (!root) return result;
+        for (int i = 0; i < root.childCount; i++)
+        {
+            var building = root.GetChild(i);
+            var collider = building.GetComponent<BoxCollider>();
+            if (!collider || !TryBuildingId(building.name, out long id)) continue;
+            var points = new List<Vector2>();
+            foreach (var corner in new[] { new Vector2(-1, -1), new Vector2(-1, 1),
+                         new Vector2(1, 1), new Vector2(1, -1) })
+                points.Add(Xz(building.TransformPoint(collider.center + new Vector3(
+                    corner.x * collider.size.x * 0.5f, 0f, corner.y * collider.size.z * 0.5f))));
+            result[id] = points;
+        }
+        return result;
+    }
+
+    static string AssetMaterialFiles()
+    {
+        if (!Directory.Exists(AssetMaterialFolder)) return "";
+        string[] files = Directory.GetFiles(AssetMaterialFolder, "*", SearchOption.AllDirectories);
+        Array.Sort(files, StringComparer.Ordinal);
+        return string.Join("\n", files);
+    }
+
+    static void RecordAssetMaterialFiles()
+    {
+        string files = AssetMaterialFiles();
+        int rebuilds = files == EditorPrefs.GetString(AssetMaterialFilesKey, "")
+            ? EditorPrefs.GetInt(AssetMaterialRebuildsKey, 0) + 1 : 0;
+        EditorPrefs.SetString(AssetMaterialFilesKey, files);
+        EditorPrefs.SetInt(AssetMaterialRebuildsKey, rebuilds);
+    }
+
+    static int CountInstanceMeshTriangles()
+    {
+        int triangles = 0;
+        foreach (var filter in UnityEngine.Object.FindObjectsByType<MeshFilter>(FindObjectsInactive.Include,
+                     FindObjectsSortMode.None))
+            if (filter.sharedMesh)
+                for (int i = 0; i < filter.sharedMesh.subMeshCount; i++)
+                    triangles += (int)filter.sharedMesh.GetIndexCount(i) / 3;
+        return triangles;
+    }
+
     static List<List<Vector2>> CreateBuildings(MapData map, List<RoadInfo> roads,
-        DetailMaterials details, List<Mesh> meshes, PropCounts props,
+        DetailMaterials details, List<Mesh> meshes, PropCounts props, AssetModel[] assets,
         out int count, out float maxHeight, out int stairBuildings, out int firstFloorOnly,
         out int totalFloors, out BuildingFloors floorVisibility)
     {
         var root = new GameObject("Buildings").transform;
+        floorVisibility = null;
+        if (UseAssetBuildings)
+        {
+            stairBuildings = firstFloorOnly = totalFloors = 0;
+            return CreateAssetBuildings(map, roads, root, assets, props, out count, out maxHeight);
+        }
         floorVisibility = root.gameObject.AddComponent<BuildingFloors>();
         var polygons = new List<List<Vector2>>();
         var entries = new List<BuildingFloors.Entry>();
@@ -2002,6 +2430,207 @@ public static class HadanCityBuilder
         return result;
     }
 
+    static void CheckAssetBuildings(MapData map, Transform root, out float maxHeight, ref int failures)
+    {
+        maxHeight = 0f;
+        AssetModel[] assets;
+        List<AssetBuildingPlan> plans;
+        var roads = RoadInfos(map);
+        try
+        {
+            assets = LoadAssetModels();
+            plans = AssetBuildingPlans(map, roads, assets, out _);
+        }
+        catch (Exception exception)
+        {
+            maxHeight = float.PositiveInfinity;
+            Check(false, "건물 에셋 검사 준비 실패: " + exception.Message, ref failures);
+            return;
+        }
+        Check(plans.Count == 459 && root && root.childCount == plans.Count,
+            "459채 모두 에셋 건물이다 (" + (root ? root.childCount : 0) + ")", ref failures);
+        bool validBuildings = root;
+        bool validScale = root;
+        bool validShops = root;
+        bool sharedMeshes = root;
+        bool staticBatching = root;
+        bool validFadeBindings = root;
+        bool facesRoad = root;
+        var pairs = new Dictionary<Material, Material>();
+        int sourceMaterials = 0;
+        bool materialAssets = true;
+        foreach (var asset in assets)
+            foreach (var source in AssetDatabase.LoadAllAssetsAtPath(asset.path))
+            {
+                if (!(source is Material material)) continue;
+                sourceMaterials++;
+                string key = AssetMaterialKey(material);
+                var opaque = AssetDatabase.LoadAssetAtPath<Material>(AssetMaterialFolder + "/" + key + "_opaque.mat");
+                var fade = AssetDatabase.LoadAssetAtPath<Material>(AssetMaterialFolder + "/" + key + "_fade.mat");
+                materialAssets &= opaque && fade && opaque.shader.name == "Universal Render Pipeline/Lit"
+                    && fade.shader.name == "Universal Render Pipeline/Lit" && fade.GetFloat("_Surface") == 1f
+                    && opaque.mainTexture == material.mainTexture && fade.mainTexture == material.mainTexture
+                    && opaque.name == key + "_opaque" && fade.name == key + "_fade";
+                if (opaque && fade) pairs[opaque] = fade;
+            }
+        var types = new int[4];
+        int roofSamples = 0;
+        int roofNavHits = 0;
+        var roofSampleIndices = new HashSet<int>();
+        for (int i = 0; i < Mathf.Min(20, plans.Count); i++) roofSampleIndices.Add(i * plans.Count / 20);
+        int shopfronts = 0;
+        int roadSamples = 0;
+        var sampleIndices = new HashSet<int>();
+        for (int i = 0; i < Mathf.Min(50, plans.Count); i++) sampleIndices.Add(i * plans.Count / 50);
+        for (int i = 0; i < plans.Count; i++)
+        {
+            var plan = plans[i];
+            var building = root ? root.Find("Building_" + plan.id) : null;
+            var collider = building ? building.GetComponent<BoxCollider>() : null;
+            var visual = building ? building.Find("AssetVisual") : null;
+            var model = visual && visual.childCount == 1 ? visual.GetChild(0) : null;
+            bool valid = building && collider && collider.enabled && !collider.isTrigger && model
+                && PrefabUtility.GetCorrespondingObjectFromSource(model.gameObject) == assets[plan.asset].model;
+            validBuildings &= valid;
+            if (!valid) { validScale = validShops = sharedMeshes = validFadeBindings = facesRoad = false; continue; }
+            validBuildings &= building.localScale == Vector3.one && building.gameObject.layer == 0
+                && building.GetComponentsInChildren<Collider>(true).Length == 1
+                && Vector3.Distance(collider.size, new Vector3(plan.box.width, plan.height, plan.box.depth)) < 0.01f
+                && Vector3.Distance(collider.center, Vector3.up * (plan.height * 0.5f)) < 0.01f
+                && Vector2.Distance(Xz(building.position), plan.box.center) < 0.01f;
+            types[(int)plan.kind]++;
+            if (roofSampleIndices.Contains(i))
+            {
+                Vector3 roofCenter = building.TransformPoint(collider.center + Vector3.up * (collider.size.y * 0.5f));
+                roofSamples++;
+                if (NavMesh.SamplePosition(roofCenter, out _, 1f, NavMesh.AllAreas)) roofNavHits++;
+            }
+            maxHeight = Mathf.Max(maxHeight, collider.size.y);
+            Vector3 scale = visual.localScale;
+            validScale &= scale.x > 0f && scale.y > 0f && scale.z > 0f
+                && Mathf.Max(scale.x / scale.z, scale.z / scale.x) <= MaxAssetDistortion + Epsilon
+                && Vector3.Distance(scale, plan.scale) < 0.001f;
+            var bodyBounds = ModelBounds(model, building);
+            validScale &= Vector3.Distance(bodyBounds.size, collider.size) < 0.01f
+                && Vector3.Distance(bodyBounds.center, collider.center) < 0.01f;
+            maxHeight = Mathf.Max(maxHeight, bodyBounds.max.y);
+            if (sampleIndices.Contains(i))
+            {
+                Vector2 forward = Xz(building.TransformDirection(AssetFront)).normalized;
+                facesRoad &= Vector2.Angle(forward, NearestRoadDirection(Xz(building.position), roads)) < 60f;
+                roadSamples++;
+            }
+            int expectedShops = 0;
+            var shop = assets[5 + RoadRandom(plan.id, 73).Next(3)];
+            if (plan.asset != 0 && (plan.kind == BuildingKind.MixedUse || plan.kind == BuildingKind.House)
+                && plan.box.width >= 4f)
+                expectedShops = plan.box.width >= shop.bounds.size.x * 2f ? 2 : 1;
+            int actualShops = 0;
+            for (int child = 0; child < building.childCount; child++)
+            {
+                var storefront = building.GetChild(child);
+                if (!storefront.name.StartsWith("Shopfront_", StringComparison.Ordinal)) continue;
+                actualShops++;
+                shopfronts++;
+                var shopModel = storefront.childCount == 1 ? storefront.GetChild(0) : null;
+                validShops &= shopModel && PrefabUtility.GetCorrespondingObjectFromSource(shopModel.gameObject) == shop.model
+                    && storefront.GetComponentsInChildren<Collider>(true).Length == 0;
+                if (!shopModel) continue;
+                var bounds = ModelBounds(shopModel, building);
+                validShops &= Mathf.Abs(bounds.min.y) < 0.01f && Mathf.Abs(bounds.size.y - FloorHeight) < 0.01f
+                    && Mathf.Abs(bounds.max.z - (collider.size.z * 0.5f + 0.05f)) < 0.01f
+                    && bounds.min.x >= -collider.size.x * 0.5f - 0.01f
+                    && bounds.max.x <= collider.size.x * 0.5f + 0.01f;
+            }
+            validShops &= actualShops == expectedShops;
+            foreach (var filter in building.GetComponentsInChildren<MeshFilter>(true))
+            {
+                var source = PrefabUtility.GetCorrespondingObjectFromSource(filter);
+                sharedMeshes &= source && source.sharedMesh == filter.sharedMesh;
+                staticBatching &= (GameObjectUtility.GetStaticEditorFlags(filter.gameObject) & StaticEditorFlags.BatchingStatic) != 0;
+            }
+            var wall = building.GetComponent<WallSegment>();
+            validFadeBindings &= wall && wall.IsExterior
+                && building.GetComponentsInChildren<WallSegment>(true).Length == 1;
+            if (!wall) continue;
+            var serialized = new SerializedObject(wall);
+            var targets = serialized.FindProperty("targets");
+            var sets = serialized.FindProperty("assetMaterials");
+            var renderers = building.GetComponentsInChildren<Renderer>(true);
+            bool setsValid = targets.arraySize == renderers.Length && sets.arraySize == renderers.Length;
+            validFadeBindings &= setsValid;
+            if (!setsValid) continue;
+            for (int renderer = 0; renderer < renderers.Length; renderer++)
+            {
+                validFadeBindings &= targets.GetArrayElementAtIndex(renderer).objectReferenceValue == renderers[renderer];
+                var set = sets.GetArrayElementAtIndex(renderer);
+                var opaque = set.FindPropertyRelative("opaque");
+                var fade = set.FindPropertyRelative("fade");
+                var shared = renderers[renderer].sharedMaterials;
+                if (opaque.arraySize != shared.Length || fade.arraySize != shared.Length)
+                { validFadeBindings = false; continue; }
+                for (int slot = 0; slot < shared.Length; slot++)
+                    validFadeBindings &= opaque.GetArrayElementAtIndex(slot).objectReferenceValue == shared[slot]
+                        && shared[slot] && pairs.TryGetValue(shared[slot], out var expectedFade)
+                        && fade.GetArrayElementAtIndex(slot).objectReferenceValue == expectedFade;
+            }
+        }
+        Check(roofSamples == 20 && roofNavHits == 0,
+            "OBB 중심 지붕 반경 1m에 NavMesh가 없다 (표본 " + roofSamples + ", 탐색 성공 " + roofNavHits + ")", ref failures);
+        Check(types[(int)BuildingKind.Commercial] > 0 && types[(int)BuildingKind.Apartment] > 0,
+            "상가·아파트 유형이 각각 1채 이상 있다 (상가 " + types[(int)BuildingKind.Commercial]
+            + ", 아파트 " + types[(int)BuildingKind.Apartment] + ")", ref failures);
+        var footprints = new List<List<Vector2>>(AssetBuildingPolygons(root).Values);
+        int overlapPairs = 0;
+        for (int i = 0; i < footprints.Count; i++)
+            for (int j = i + 1; j < footprints.Count; j++)
+                if (BuildingOverlapArea(footprints[i], footprints[j]) > 0.5f) overlapPairs++;
+        Debug.Log("[Hadan Asset] 건물 OBB XZ 겹침 면적 0.5㎡ 초과 쌍 " + overlapPairs);
+        Check(validBuildings, "모든 건물에 원본 FBX 인스턴스와 Default 레이어 OBB BoxCollider가 있다", ref failures);
+        Check(validScale, "모든 건물의 X/Z 비율 왜곡이 1.6 이하이고 외관 크기가 콜라이더와 같다", ref failures);
+        Check(facesRoad && roadSamples == 50, "앞면과 가장 가까운 도로 방향 각 <60° (" + roadSamples + "채)", ref failures);
+        Check(validShops, "한글 가게 앞면이 1층·외벽 밖 0.05m에 있고 콜라이더가 없다 (" + shopfronts + ")", ref failures);
+        Check(sharedMeshes && staticBatching, "원본 메쉬를 공유하고 정적 배칭이 설정돼 있다", ref failures);
+        Check(validFadeBindings, "건물마다 외벽 WallSegment 한 조각이 모든 재질 슬롯에 반투명본을 연결한다", ref failures);
+        Check(materialAssets && pairs.Count == sourceMaterials
+            && AssetDatabase.FindAssets("t:Material", new[] { AssetMaterialFolder }).Length == sourceMaterials * 2,
+            "원본 재질 " + sourceMaterials + "개마다 공유 URP Lit 불투명·반투명 에셋이 하나씩 있다", ref failures);
+        Check(EditorPrefs.GetInt(AssetMaterialRebuildsKey, 0) >= 1
+            && AssetMaterialFiles() == EditorPrefs.GetString(AssetMaterialFilesKey, ""),
+            "같은 빌드 2번에 에셋 재질 파일 목록·수가 같다", ref failures);
+        Check(root && root.GetComponentsInChildren<BuildingFloors>(true).Length == 0
+            && root.GetComponentsInChildren<Room>(true).Length == 0
+            && root.GetComponentsInChildren<WindowFrame>(true).Length == 0 && !GameObject.Find("BuildingDecorations"),
+            "에셋 경로에서는 15·16번 직접 생성 장식·실내를 만들지 않는다", ref failures);
+        var wires = GameObject.Find("StreetProps")?.transform.Find("Wires");
+        Check(wires && wires.GetComponentsInChildren<Collider>(true).Length == 0,
+            "전선이 유지되고 장식 콜라이더가 없다", ref failures);
+    }
+
+    static float BuildingOverlapArea(List<Vector2> a, List<Vector2> b)
+    {
+        var polygon = new List<Vector2>(a);
+        float winding = Mathf.Sign(SignedArea(b));
+        for (int edge = 0; edge < b.Count && polygon.Count > 0; edge++)
+        {
+            var clipped = new List<Vector2>();
+            for (int i = 0; i < polygon.Count; i++)
+            {
+                Vector2 from = polygon[i];
+                Vector2 to = polygon[(i + 1) % polygon.Count];
+                float fromSide = winding * Cross(b[edge], b[(edge + 1) % b.Count], from);
+                float toSide = winding * Cross(b[edge], b[(edge + 1) % b.Count], to);
+                bool fromInside = fromSide >= 0f;
+                bool toInside = toSide >= 0f;
+                if (fromInside) clipped.Add(from);
+                if (fromInside != toInside)
+                    clipped.Add(Vector2.Lerp(from, to, fromSide / (fromSide - toSide)));
+            }
+            polygon = clipped;
+        }
+        return Mathf.Abs(SignedArea(polygon));
+    }
+
     static int CountBadFaces(Mesh mesh, string partName, List<Vector2> polygon, ref int logged)
     {
         if (!mesh) return 1;
@@ -2700,7 +3329,8 @@ public static class HadanCityBuilder
         int triangles = 0;
         for (int i = 0; i < filters.Length; i++)
             if (filters[i].sharedMesh && meshes.Add(filters[i].sharedMesh))
-                triangles += filters[i].sharedMesh.triangles.Length / 3;
+                for (int subMesh = 0; subMesh < filters[i].sharedMesh.subMeshCount; subMesh++)
+                    triangles += (int)filters[i].sharedMesh.GetIndexCount(subMesh) / 3;
         return triangles;
     }
 
@@ -2783,6 +3413,38 @@ public static class HadanCityBuilder
         else { failures++; Debug.LogError("[Hadan Check] FAIL: " + message); }
     }
 
+    class AssetModel
+    {
+        public GameObject model;
+        public string path;
+        public Bounds bounds;
+    }
+
+    struct BuildingBox
+    {
+        public Vector2 center;
+        public Vector2 forward;
+        public float width;
+        public float depth;
+    }
+
+    class AssetBuildingPlan
+    {
+        public long id;
+        public BuildingKind kind;
+        public BuildingBox box;
+        public int asset;
+        public float height;
+        public Vector3 scale;
+        public bool clipped;
+    }
+
+    struct AssetMaterialPair
+    {
+        public Material opaque;
+        public Material fade;
+    }
+
     enum BuildingKind
     {
         Commercial,
@@ -2857,6 +3519,10 @@ public static class HadanCityBuilder
     class PropCounts
     {
         public readonly int[] types = new int[4];
+        public readonly int[] assets = new int[8];
+        public int shopfronts;
+        public int clippedAssets;
+        public int skippedAssets;
         public int doors;
         public int awnings;
         public int rooftop;
