@@ -26,6 +26,10 @@ public static class HadanCityBuilder
     const string DataStableKey = "HadanCityBuilder.DataFilesStable";
     const bool UseAssetBuildings = true;
     const string BuildingPackFolder = "Assets/_Game/Art/Buildings/Pack";
+    const string VehicleFolder = "Assets/_Game/Art/Vehicles";
+    const string RoadTextureFolder = "Assets/_Game/Art/Roads";
+    const string AsphaltTexturePath = DataFolder + "/hadan_asphalt.asset";
+    static readonly string[] CarNames = { "sedan", "sports", "suv", "suv2", "lanos", "truck", "bus", "policebus" };
     const string AssetMaterialFolder = DataFolder + "/AssetMaterials";
     const string AssetMaterialFilesKey = "HadanCityBuilder.AssetMaterialFiles";
     const string AssetMaterialRebuildsKey = "HadanCityBuilder.AssetMaterialRebuilds";
@@ -70,10 +74,12 @@ public static class HadanCityBuilder
     {
         MapData map;
         AssetModel[] assetModels;
+        AssetModel[] carModels;
         try
         {
             map = LoadMap();
             assetModels = UseAssetBuildings ? LoadAssetModels() : null;
+            carModels = LoadCarModels();
             if (UseAssetBuildings) AssetBuildingPlans(map, RoadInfos(map), assetModels, out _);
         }
         catch (Exception exception)
@@ -90,7 +96,7 @@ public static class HadanCityBuilder
         V01SceneBuilder.ApplyRenderSettings();
         V01SceneBuilder.CreateLight();
 
-        var roadMaterial = HadanMaterial("hadan_road", new Color(0.16f, 0.17f, 0.18f));
+        var roadMaterial = HadanMaterial("hadan_road", Color.white, EnsureAsphaltTexture());
         var groundMaterial = HadanMaterial("hadan_ground", new Color(0.30f, 0.34f, 0.29f));
         var detailMaterials = CreateDetailMaterials();
         var roads = RoadInfos(map);
@@ -101,10 +107,10 @@ public static class HadanCityBuilder
         var buildings = CreateBuildings(map, roads, detailMaterials, meshes, counts, assetModels,
             out int buildingCount, out float maxHeight, out int stairBuildings,
             out int firstFloorOnly, out int totalFloors, out BuildingFloors floorVisibility);
-        int roadCount = CreateRoads(roads, roadMaterial, meshes);
+        int roadCount = CreateRoads(roads, roadMaterial, meshes, counts);
 
         Vector2 spawn = FindSpawn(map, buildings);
-        CreateStreetProps(roads, buildings, spawn, detailMaterials, meshes, counts);
+        CreateStreetProps(roads, buildings, spawn, detailMaterials, meshes, counts, carModels);
         var clock = V01SceneBuilder.CreateGameClock();
         var player = V01SceneBuilder.CreatePlayer();
         player.transform.position = new Vector3(spawn.x, player.transform.position.y, spawn.y);
@@ -156,12 +162,18 @@ public static class HadanCityBuilder
                   + ", 삼각형 " + triangles.ToString("N0")
                   + ", 최고 " + maxHeight.ToString("F1") + "m, NavMesh " + watch.ElapsedMilliseconds + "ms");
         if (UseAssetBuildings)
-            Debug.Log("[Hadan Asset] bld_00=" + counts.assets[0] + ", bld_01=" + counts.assets[1]
-                + ", bld_02=" + counts.assets[2] + ", bld_03=" + counts.assets[3] + ", bld_04=" + counts.assets[4]
-                + ", shop_1=" + counts.assets[5] + ", shop_2=" + counts.assets[6] + ", shop_4=" + counts.assets[7]
-                + ", 가게 앞면 " + counts.shopfronts + ", 왜곡 잘림 " + counts.clippedAssets
+        {
+            var usage = new List<string>();
+            for (int i = 0; i < 13; i++) usage.Add("bld_" + i.ToString("D2") + "=" + counts.assets[i]);
+            Debug.Log("[Hadan Asset] " + string.Join(", ", usage) + ", 가게 앞면 " + counts.shopfronts
+                + ", 왜곡 잘림 " + counts.clippedAssets + ", 높이 잘림 " + counts.heightClippedAssets
                 + ", 건너뜀 " + counts.skippedAssets
                 + ", 인스턴스 삼각형 " + CountInstanceMeshTriangles().ToString("N0"));
+        }
+        var carUsage = new List<string>();
+        for (int i = 0; i < CarNames.Length; i++) carUsage.Add(CarNames[i] + "=" + counts.carTypes[i]);
+        Debug.Log("[Hadan] 차 " + string.Join(", ", carUsage) + ", 연석 메쉬 " + counts.curbMeshes
+            + ", 연석 총 길이 " + counts.curbLength.ToString("F1") + "m");
         if (watch.ElapsedMilliseconds > 180000)
             Debug.LogWarning("[Hadan] NavMesh 굽기가 3분을 넘었습니다: " + watch.ElapsedMilliseconds + "ms");
     }
@@ -266,6 +278,7 @@ public static class HadanCityBuilder
                 if (DistanceToPolygon(point, polygon) < 0.4f - Epsilon) { arrivalClear = false; break; }
         }
         Check(arrivalClear, "Arrive_FromEstate 가 있고 건물 콜라이더와 겹치지 않는다", ref failures);
+        CheckRoadDetails(ref failures);
         CheckStreetProps(polygons, arrival ? new Vector2(arrival.transform.position.x, arrival.transform.position.z) : default,
             ref failures);
 
@@ -619,6 +632,8 @@ public static class HadanCityBuilder
     static AssetModel[] LoadAssetModels()
     {
         string[] names = { "hadan_bld_00", "hadan_bld_01", "hadan_bld_02", "hadan_bld_03", "hadan_bld_04",
+            "hadan_bld_05", "hadan_bld_06", "hadan_bld_07", "hadan_bld_08", "hadan_bld_09",
+            "hadan_bld_10", "hadan_bld_11", "hadan_bld_12",
             "hadan_shop_1", "hadan_shop_2", "hadan_shop_4" };
         var assets = new AssetModel[names.Length];
         for (int i = 0; i < names.Length; i++)
@@ -730,11 +745,25 @@ public static class HadanCityBuilder
         return box;
     }
 
-    static int SelectBuildingAsset(BuildingKind kind, BuildingBox box, AssetModel[] assets, long id)
+    static int SelectBuildingAsset(BuildingKind kind, BuildingBox box, AssetModel[] assets, long id, int floors)
     {
-        int[] candidates = kind == BuildingKind.Commercial ? new[] { 0, 2 }
-            : kind == BuildingKind.MixedUse ? new[] { 1, 3, 0 }
-            : kind == BuildingKind.House ? new[] { 4, 3 } : new[] { 0 };
+        int[] candidates = kind == BuildingKind.Commercial ? new[] { 0, 2, 6, 7, 11 }
+            : kind == BuildingKind.MixedUse ? new[] { 1, 3, 0, 9, 5, 6 }
+            : kind == BuildingKind.House ? new[] { 4, 3, 5, 10, 8 } : new[] { 0, 12 };
+        var fitting = new List<int>();
+        var closeFloors = new List<int>();
+        foreach (int candidate in candidates)
+        {
+            Vector3 size = assets[candidate].bounds.size;
+            float sx = box.width / size.x;
+            float sz = box.depth / size.z;
+            if (sx > sz * MaxAssetDistortion || sz > sx * MaxAssetDistortion) continue;
+            fitting.Add(candidate);
+            if (Mathf.Abs(Mathf.RoundToInt(size.y / FloorHeight) - floors) < 3) closeFloors.Add(candidate);
+        }
+        // 층수 차이로 후보가 사라지면 잘림 없는 후보 전체를 사용한다.
+        var choices = closeFloors.Count > 0 ? closeFloors : fitting;
+        if (choices.Count > 0) return choices[RoadRandom(id, 71).Next(choices.Count)];
         int start = RoadRandom(id, 71).Next(candidates.Length);
         int best = candidates[start];
         float bestDistortion = float.PositiveInfinity;
@@ -744,13 +773,17 @@ public static class HadanCityBuilder
             Vector3 size = assets[candidate].bounds.size;
             float sx = box.width / size.x;
             float sz = box.depth / size.z;
-            float distortion = Mathf.Max(sx / sz, sz / sx);
+            float distortion = Mathf.Max(sx / sz, sz / sx)
+                + Mathf.Abs(Mathf.RoundToInt(size.y / FloorHeight) - floors);
             if (distortion >= bestDistortion) continue;
             best = candidate;
             bestDistortion = distortion;
         }
         return best;
     }
+
+    static bool HasOwnSign(int asset)
+        => asset == 0 || asset == 6 || asset == 7 || asset == 8 || asset == 9 || asset == 11;
 
     static Vector3 FitBuildingAsset(BuildingBox box, Vector3 nativeSize, float height, out bool clipped)
     {
@@ -788,13 +821,15 @@ public static class HadanCityBuilder
                 skipped++;
                 continue;
             }
-            int asset = SelectBuildingAsset(kind, box, assets, element.id);
-            float height = floors * FloorHeight;
+            int asset = SelectBuildingAsset(kind, box, assets, element.id, floors);
+            float targetHeight = floors * FloorHeight;
+            float nativeHeight = assets[asset].bounds.size.y;
+            float height = Mathf.Clamp(targetHeight, nativeHeight * 0.75f, nativeHeight * 1.35f);
             Vector3 scale = FitBuildingAsset(box, assets[asset].bounds.size, height, out bool clipped);
             box.width = assets[asset].bounds.size.x * scale.x;
             box.depth = assets[asset].bounds.size.z * scale.z;
             plans.Add(new AssetBuildingPlan { id = element.id, kind = kind, box = box, asset = asset,
-                height = height, scale = scale, clipped = clipped });
+                height = height, scale = scale, clipped = clipped, heightClipped = height != targetHeight });
         }
         return plans;
     }
@@ -911,10 +946,10 @@ public static class HadanCityBuilder
             modifier.overrideArea = true;
             modifier.area = NavMesh.GetAreaFromName("Not Walkable");
             CreateAssetVisual(building, "AssetVisual", assets[plan.asset], plan.scale, Vector3.zero, materials);
-            if (plan.asset != 0 && (plan.kind == BuildingKind.MixedUse || plan.kind == BuildingKind.House)
+            if (!HasOwnSign(plan.asset) && (plan.kind == BuildingKind.MixedUse || plan.kind == BuildingKind.House)
                 && plan.box.width >= 4f)
             {
-                int shopIndex = 5 + RoadRandom(plan.id, 73).Next(3);
+                int shopIndex = 13 + RoadRandom(plan.id, 73).Next(3);
                 var shop = assets[shopIndex];
                 int shopCount = plan.box.width >= shop.bounds.size.x * 2f ? 2 : 1;
                 float width = Mathf.Min(shop.bounds.size.x, plan.box.width / shopCount);
@@ -942,6 +977,7 @@ public static class HadanCityBuilder
             counts.types[(int)plan.kind]++;
             counts.assets[plan.asset]++;
             if (plan.clipped) counts.clippedAssets++;
+            if (plan.heightClipped) counts.heightClippedAssets++;
             maxHeight = Mathf.Max(maxHeight, plan.height);
         }
         V01SceneBuilder.MarkStatic(root);
@@ -1343,10 +1379,39 @@ public static class HadanCityBuilder
         triangles.Add(first + 3);
     }
 
-    static int CreateRoads(List<RoadInfo> roads, Material material, List<Mesh> meshes)
+    static Texture2D EnsureAsphaltTexture()
+    {
+        var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(AsphaltTexturePath);
+        if (texture) return texture;
+        // 부분 아틀라스의 반복과 상단 횡단보도 유입을 막고 원본 임포터는 건드리지 않는다.
+        var source = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+        try
+        {
+            if (!ImageConversion.LoadImage(source, File.ReadAllBytes(RoadTextureFolder + "/road_atlas_baseColor.png")))
+                throw new InvalidDataException("도로 아틀라스를 읽지 못했습니다.");
+            int x = Mathf.CeilToInt(source.width * 0.38f);
+            int width = Mathf.FloorToInt(source.width * 0.70f) - x;
+            int height = Mathf.FloorToInt(source.height * 0.92f);
+            texture = new Texture2D(width, height, TextureFormat.RGBA32, true)
+                { name = "hadan_asphalt", wrapMode = TextureWrapMode.Repeat, filterMode = FilterMode.Bilinear };
+            texture.SetPixels(source.GetPixels(x, 0, width, height));
+            texture.Apply(true, false);
+            AssetDatabase.CreateAsset(texture, AsphaltTexturePath);
+            return texture;
+        }
+        finally { UnityEngine.Object.DestroyImmediate(source); }
+    }
+
+    static int CreateRoads(List<RoadInfo> roads, Material material, List<Mesh> meshes, PropCounts counts)
     {
         var vertices = new List<Vector3>();
         var triangles = new List<int>();
+        var uvs = new List<Vector2>();
+        var curbMaterial = HadanMaterial("hadan_curb", Color.white,
+            AssetDatabase.LoadAssetAtPath<Texture2D>(RoadTextureFolder + "/curb_baseColor.png"));
+        curbMaterial.SetTexture("_BumpMap", AssetDatabase.LoadAssetAtPath<Texture2D>(RoadTextureFolder + "/curb_normal.png"));
+        curbMaterial.EnableKeyword("_NORMALMAP");
+        var curbRoot = new GameObject("Curbs").transform;
         int roadCount = 0;
 
         for (int i = 0; i < roads.Count; i++)
@@ -1354,6 +1419,8 @@ public static class HadanCityBuilder
             var road = roads[i];
 
             bool emitted = false;
+            float distance = 0f;
+            var curb = new MeshBatch("Curb_" + road.id, curbMaterial);
             for (int j = 0; j < road.points.Count - 1; j++)
             {
                 Vector2 from = road.points[j];
@@ -1373,13 +1440,34 @@ public static class HadanCityBuilder
                 triangles.Add(first);
                 triangles.Add(first + 3);
                 triangles.Add(first + 2);
+                float length = direction.magnitude;
+                uvs.Add(new Vector2(0f, distance / 8f));
+                uvs.Add(new Vector2(1f, distance / 8f));
+                uvs.Add(new Vector2(1f, (distance + length) / 8f));
+                uvs.Add(new Vector2(0f, (distance + length) / 8f));
+                distance += length;
+                var rotation = Quaternion.LookRotation(new Vector3(direction.x, 0f, direction.y));
+                for (int sign = -1; sign <= 1; sign += 2)
+                {
+                    Vector2 center = (from + to) * 0.5f + side.normalized * sign * (road.halfWidth + 0.125f);
+                    curb.AddBox(new Vector3(center.x, RoadY + 0.075f, center.y),
+                        new Vector3(0.25f, 0.15f, length), rotation);
+                    counts.curbLength += length;
+                }
                 emitted = true;
             }
-            if (emitted) roadCount++;
+            if (emitted)
+            {
+                roadCount++;
+                curb.Emit(curbRoot, meshes);
+                meshes[meshes.Count - 1].RecalculateTangents();
+                counts.curbMeshes++;
+            }
         }
 
         var mesh = new Mesh { name = "HadanRoads", indexFormat = IndexFormat.UInt32 };
         mesh.SetVertices(vertices);
+        mesh.SetUVs(0, uvs);
         mesh.SetTriangles(triangles, 0);
         mesh.RecalculateNormals();
         mesh.RecalculateBounds();
@@ -1594,7 +1682,7 @@ public static class HadanCityBuilder
     }
 
     static void CreateStreetProps(List<RoadInfo> roads, List<List<Vector2>> buildings, Vector2 spawn,
-        DetailMaterials materials, List<Mesh> meshes, PropCounts counts)
+        DetailMaterials materials, List<Mesh> meshes, PropCounts counts, AssetModel[] carModels)
     {
         var root = new GameObject("StreetProps").transform;
         var treeRoot = new GameObject("Trees").transform;
@@ -1604,6 +1692,7 @@ public static class HadanCityBuilder
         poleRoot.SetParent(root, false);
         carRoot.SetParent(root, false);
         var occupied = new List<Placement>();
+        var carSlots = new List<CarSlot>();
         var wireBatch = new MeshBatch("Wires", materials.wire);
 
         for (int i = 0; i < roads.Count; i++)
@@ -1670,11 +1759,16 @@ public static class HadanCityBuilder
                 Vector2 side = new Vector2(-direction.y, direction.x);
                 Vector2 position = point + side * (random.Next(2) == 0 ? -1f : 1f) * road.halfWidth * 0.5f;
                 if (!CanPlace(position, CarRadius, buildings, spawn, occupied)) continue;
-                CreateCar(carRoot, position, direction, (float)random.NextDouble() * 16f - 8f, materials, counts);
+                float angle = (float)random.NextDouble() * 16f - 8f;
+                carSlots.Add(new CarSlot { position = position, direction = direction, angle = angle,
+                    seed = unchecked(road.id * 397 + car) });
                 occupied.Add(new Placement(position, CarRadius));
             }
         }
 
+        var carFootprints = new List<List<Vector2>>();
+        foreach (var slot in carSlots)
+            CreateCar(carRoot, slot, carModels, buildings, occupied, carFootprints, counts);
         wireBatch.Emit(root, meshes);
         V01SceneBuilder.MarkStatic(root);
     }
@@ -1721,17 +1815,91 @@ public static class HadanCityBuilder
         counts.poles++;
     }
 
-    static void CreateCar(Transform parent, Vector2 position, Vector2 direction, float angle,
-        DetailMaterials materials, PropCounts counts)
+    static AssetModel[] LoadCarModels()
     {
+        var models = new AssetModel[CarNames.Length];
+        for (int i = 0; i < models.Length; i++)
+        {
+            string path = VehicleFolder + "/hadan_car_" + CarNames[i] + ".fbx";
+            var model = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (!model) throw new InvalidOperationException("차 에셋이 없습니다: " + path);
+            var bounds = ModelBounds(model.transform, model.transform.parent);
+            if (bounds.size.x <= Epsilon || bounds.size.y <= Epsilon || bounds.size.z <= Epsilon)
+                throw new InvalidOperationException("차 에셋 크기가 유효하지 않습니다: " + path);
+            models[i] = new AssetModel { model = model, path = path, bounds = bounds };
+        }
+        return models;
+    }
+
+    static List<Vector2> CarFootprint(Vector2 position, Quaternion rotation, Bounds bounds)
+        => BuildingBoxPolygon(new BuildingBox { center = position, forward = Xz(rotation * Vector3.forward),
+            width = bounds.size.x, depth = bounds.size.z });
+
+    static bool CarFits(List<Vector2> footprint, Vector2 position, List<List<Vector2>> buildings,
+        List<Placement> occupied, List<List<Vector2>> cars)
+    {
+        foreach (var building in buildings)
+            if (PolygonDistance(footprint, building) < 1f - Epsilon) return false;
+        foreach (var prop in occupied)
+            if ((prop.point - position).sqrMagnitude > Epsilon
+                && DistanceToPolygon(prop.point, footprint) < (prop.radius == CarRadius ? 6f : prop.radius) - Epsilon) return false;
+        foreach (var car in cars)
+            if (PolygonDistance(footprint, car) <= Epsilon) return false;
+        return true;
+    }
+
+    static float PolygonDistance(List<Vector2> a, List<Vector2> b)
+    {
+        if (PointInPolygon(a[0], b) || PointInPolygon(b[0], a)) return 0f;
+        float distance = float.PositiveInfinity;
+        for (int i = 0; i < a.Count; i++)
+            for (int j = 0; j < b.Count; j++)
+                distance = Mathf.Min(distance, SegmentDistance(a[i], a[(i + 1) % a.Count],
+                    b[j], b[(j + 1) % b.Count]));
+        return distance;
+    }
+
+    static void CreateCar(Transform parent, CarSlot slot, AssetModel[] models,
+        List<List<Vector2>> buildings, List<Placement> occupied, List<List<Vector2>> footprints, PropCounts counts)
+    {
+        var random = RoadRandom(slot.seed, 79);
+        int roll = random.Next(100);
+        int index = roll < 75 ? random.Next(5) : roll < 90 ? 5 : 6 + random.Next(2);
+        var rotation = Quaternion.LookRotation(new Vector3(slot.direction.x, 0f, slot.direction.y))
+            * Quaternion.Euler(0f, slot.angle, 0f);
+        var footprint = CarFootprint(slot.position, rotation, models[index].bounds);
+        if (index >= 6 && !CarFits(footprint, slot.position, buildings, occupied, footprints))
+        {
+            int start = random.Next(5);
+            bool fits = false;
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                index = (start + attempt) % 5;
+                footprint = CarFootprint(slot.position, rotation, models[index].bounds);
+                if (!CarFits(footprint, slot.position, buildings, occupied, footprints)) continue;
+                fits = true;
+                break;
+            }
+            if (!fits) throw new InvalidOperationException("기존 차 자리에서 승용차를 배치할 수 없습니다: " + slot.position);
+        }
+        var asset = models[index];
         var car = new GameObject("AbandonedCar").transform;
         car.SetParent(parent, false);
-        car.position = new Vector3(position.x, 0f, position.y);
-        car.rotation = Quaternion.LookRotation(new Vector3(direction.x, 0f, direction.y)) * Quaternion.Euler(0f, angle, 0f);
-        CreatePrimitive(PrimitiveType.Cube, "Body", car, new Vector3(0f, 0.55f, 0f),
-            new Vector3(1.9f, 0.8f, 4.2f), Quaternion.identity, materials.car, true);
-        CreatePrimitive(PrimitiveType.Cube, "Roof", car, new Vector3(0f, 1.15f, -0.2f),
-            new Vector3(1.55f, 0.55f, 2.1f), Quaternion.identity, materials.carRoof, false);
+        car.position = new Vector3(slot.position.x, 0f, slot.position.y);
+        car.rotation = rotation;
+        var visual = new GameObject("CarVisual").transform;
+        visual.SetParent(car, false);
+        visual.localPosition = -new Vector3(asset.bounds.center.x, asset.bounds.min.y, asset.bounds.center.z);
+        var model = (GameObject)PrefabUtility.InstantiatePrefab(asset.model, visual);
+        model.transform.localPosition = asset.model.transform.localPosition;
+        model.transform.localRotation = asset.model.transform.localRotation;
+        model.transform.localScale = asset.model.transform.localScale;
+        foreach (var collider in model.GetComponentsInChildren<Collider>(true)) UnityEngine.Object.DestroyImmediate(collider);
+        var box = car.gameObject.AddComponent<BoxCollider>();
+        box.size = asset.bounds.size;
+        box.center = Vector3.up * (asset.bounds.size.y * 0.5f);
+        footprints.Add(footprint);
+        counts.carTypes[index]++;
         counts.cars++;
     }
 
@@ -2479,6 +2647,10 @@ public static class HadanCityBuilder
         var roofSampleIndices = new HashSet<int>();
         for (int i = 0; i < Mathf.Min(20, plans.Count); i++) roofSampleIndices.Add(i * plans.Count / 20);
         int shopfronts = 0;
+        int signedShopfronts = 0;
+        var usedAssets = new HashSet<int>();
+        var assetUsage = new int[13];
+        int mostUsedAssetCount = 0;
         int roadSamples = 0;
         var sampleIndices = new HashSet<int>();
         for (int i = 0; i < Mathf.Min(50, plans.Count); i++) sampleIndices.Add(i * plans.Count / 50);
@@ -2498,6 +2670,8 @@ public static class HadanCityBuilder
                 && Vector3.Distance(collider.size, new Vector3(plan.box.width, plan.height, plan.box.depth)) < 0.01f
                 && Vector3.Distance(collider.center, Vector3.up * (plan.height * 0.5f)) < 0.01f
                 && Vector2.Distance(Xz(building.position), plan.box.center) < 0.01f;
+            usedAssets.Add(plan.asset);
+            mostUsedAssetCount = Mathf.Max(mostUsedAssetCount, ++assetUsage[plan.asset]);
             types[(int)plan.kind]++;
             if (roofSampleIndices.Contains(i))
             {
@@ -2507,7 +2681,7 @@ public static class HadanCityBuilder
             }
             maxHeight = Mathf.Max(maxHeight, collider.size.y);
             Vector3 scale = visual.localScale;
-            validScale &= scale.x > 0f && scale.y > 0f && scale.z > 0f
+            validScale &= scale.x > 0f && scale.y >= 0.75f - Epsilon && scale.y <= 1.35f + Epsilon && scale.z > 0f
                 && Mathf.Max(scale.x / scale.z, scale.z / scale.x) <= MaxAssetDistortion + Epsilon
                 && Vector3.Distance(scale, plan.scale) < 0.001f;
             var bodyBounds = ModelBounds(model, building);
@@ -2521,8 +2695,8 @@ public static class HadanCityBuilder
                 roadSamples++;
             }
             int expectedShops = 0;
-            var shop = assets[5 + RoadRandom(plan.id, 73).Next(3)];
-            if (plan.asset != 0 && (plan.kind == BuildingKind.MixedUse || plan.kind == BuildingKind.House)
+            var shop = assets[13 + RoadRandom(plan.id, 73).Next(3)];
+            if (!HasOwnSign(plan.asset) && (plan.kind == BuildingKind.MixedUse || plan.kind == BuildingKind.House)
                 && plan.box.width >= 4f)
                 expectedShops = plan.box.width >= shop.bounds.size.x * 2f ? 2 : 1;
             int actualShops = 0;
@@ -2543,6 +2717,7 @@ public static class HadanCityBuilder
                     && bounds.max.x <= collider.size.x * 0.5f + 0.01f;
             }
             validShops &= actualShops == expectedShops;
+            if (HasOwnSign(plan.asset)) signedShopfronts += actualShops;
             foreach (var filter in building.GetComponentsInChildren<MeshFilter>(true))
             {
                 var source = PrefabUtility.GetCorrespondingObjectFromSource(filter);
@@ -2589,6 +2764,10 @@ public static class HadanCityBuilder
         Check(validBuildings, "모든 건물에 원본 FBX 인스턴스와 Default 레이어 OBB BoxCollider가 있다", ref failures);
         Check(validScale, "모든 건물의 X/Z 비율 왜곡이 1.6 이하이고 외관 크기가 콜라이더와 같다", ref failures);
         Check(facesRoad && roadSamples == 50, "앞면과 가장 가까운 도로 방향 각 <60° (" + roadSamples + "채)", ref failures);
+        Check(usedAssets.Count >= 10, "건물 13종 중 10종 이상 사용 (" + usedAssets.Count + ")", ref failures);
+        Check(plans.Count > 0 && mostUsedAssetCount <= plans.Count * 0.35d,
+            "최다 사용 건물 에셋이 전체의 35% 이하 (" + mostUsedAssetCount + "/" + plans.Count + ")", ref failures);
+        Check(signedShopfronts == 0, "자체 간판 건물의 추가 가게 앞면이 0개다", ref failures);
         Check(validShops, "한글 가게 앞면이 1층·외벽 밖 0.05m에 있고 콜라이더가 없다 (" + shopfronts + ")", ref failures);
         Check(sharedMeshes && staticBatching, "원본 메쉬를 공유하고 정적 배칭이 설정돼 있다", ref failures);
         Check(validFadeBindings, "건물마다 외벽 WallSegment 한 조각이 모든 재질 슬롯에 반투명본을 연결한다", ref failures);
@@ -3043,6 +3222,24 @@ public static class HadanCityBuilder
             "간판·실외기·전선·옥탑방 문 무늬의 결합 메쉬가 있다", ref failures);
     }
 
+    static void CheckRoadDetails(ref int failures)
+    {
+        var roads = GameObject.Find("Roads");
+        var renderer = roads ? roads.GetComponent<MeshRenderer>() : null;
+        var texture = renderer && renderer.sharedMaterial ? renderer.sharedMaterial.mainTexture : null;
+        string path = texture ? AssetDatabase.GetAssetPath(texture) : "";
+        Check(renderer && renderer.sharedMaterial.name == "hadan_road"
+            && (path == AsphaltTexturePath || path == RoadTextureFolder + "/road_atlas_baseColor.png"),
+            "도로 재질에 아틀라스 또는 아스팔트 텍스처가 있다", ref failures);
+        var curbs = GameObject.Find("Curbs");
+        var filters = curbs ? curbs.GetComponentsInChildren<MeshFilter>(true) : Array.Empty<MeshFilter>();
+        bool valid = filters.Length > 0 && curbs.GetComponentsInChildren<Collider>(true).Length == 0;
+        foreach (var filter in filters)
+            valid &= filter.sharedMesh && filter.sharedMesh.vertexCount > 0
+                && (GameObjectUtility.GetStaticEditorFlags(filter.gameObject) & StaticEditorFlags.NavigationStatic) == 0;
+        Check(valid, "연석 메쉬가 있고 콜라이더와 NavigationStatic이 없다 (" + filters.Length + ")", ref failures);
+    }
+
     static void CheckStreetProps(Dictionary<long, List<Vector2>> polygons, Vector2 spawn, ref int failures)
     {
         var root = GameObject.Find("StreetProps");
@@ -3052,6 +3249,8 @@ public static class HadanCityBuilder
         int trees = 0;
         int poles = 0;
         int cars = 0;
+        bool assetCars = root;
+        var carTypes = new HashSet<string>();
         var occupied = new List<Placement>();
 
         if (root)
@@ -3082,7 +3281,39 @@ public static class HadanCityBuilder
                     {
                         radius = CarRadius;
                         cars++;
-                        collidersValid &= prop.GetComponentInChildren<BoxCollider>(true);
+                        var box = prop.GetComponent<BoxCollider>();
+                        collidersValid &= box && box.enabled && !box.isTrigger
+                            && prop.GetComponentsInChildren<Collider>(true).Length == 1;
+                        var visual = prop.Find("CarVisual");
+                        var model = visual && visual.childCount == 1 ? visual.GetChild(0) : null;
+                        var source = model ? PrefabUtility.GetCorrespondingObjectFromSource(model.gameObject) : null;
+                        string path = source ? AssetDatabase.GetAssetPath(source) : "";
+                        bool recognized = false;
+                        foreach (string name in CarNames)
+                            recognized |= path == VehicleFolder + "/hadan_car_" + name + ".fbx";
+                        assetCars &= recognized && !prop.Find("Body") && !prop.Find("Roof");
+                        if (recognized) carTypes.Add(path);
+                        if (model && box)
+                        {
+                            var bounds = ModelBounds(model, prop);
+                            collidersValid &= Vector3.Distance(bounds.size, box.size) < 0.01f
+                                && Vector3.Distance(bounds.center, box.center) < 0.01f;
+                            foreach (var filter in model.GetComponentsInChildren<MeshFilter>(true))
+                            {
+                                var original = PrefabUtility.GetCorrespondingObjectFromSource(filter);
+                                assetCars &= original && original.sharedMesh == filter.sharedMesh
+                                    && (GameObjectUtility.GetStaticEditorFlags(filter.gameObject) & StaticEditorFlags.BatchingStatic) != 0;
+                            }
+                            foreach (var renderer in model.GetComponentsInChildren<Renderer>(true))
+                            {
+                                var original = PrefabUtility.GetCorrespondingObjectFromSource(renderer);
+                                var shared = renderer.sharedMaterials;
+                                assetCars &= original && original.sharedMaterials.Length == shared.Length;
+                                if (!original || original.sharedMaterials.Length != shared.Length) continue;
+                                for (int slot = 0; slot < shared.Length; slot++)
+                                    assetCars &= shared[slot] == original.sharedMaterials[slot];
+                            }
+                        }
                     }
                     else continue;
 
@@ -3105,6 +3336,8 @@ public static class HadanCityBuilder
             }
         }
 
+        Check(cars == 56 && assetCars && carTypes.Count >= 3,
+            "차 56대 모두 원본 FBX·공유 메쉬·원본 재질이며 3종 이상이다 (" + cars + "/" + carTypes.Count + ")", ref failures);
         Check(trees > 0 && poles > 0 && cars > 0,
             "거리 소품이 있다 (나무 " + trees + ", 전봇대 " + poles + ", 차 " + cars + ")", ref failures);
         Check(collidersValid, "나무 줄기·전봇대·차에 지정 콜라이더가 있다", ref failures);
@@ -3437,6 +3670,7 @@ public static class HadanCityBuilder
         public float height;
         public Vector3 scale;
         public bool clipped;
+        public bool heightClipped;
     }
 
     struct AssetMaterialPair
@@ -3519,9 +3753,13 @@ public static class HadanCityBuilder
     class PropCounts
     {
         public readonly int[] types = new int[4];
-        public readonly int[] assets = new int[8];
+        public readonly int[] assets = new int[16];
+        public readonly int[] carTypes = new int[8];
+        public int curbMeshes;
+        public float curbLength;
         public int shopfronts;
         public int clippedAssets;
+        public int heightClippedAssets;
         public int skippedAssets;
         public int doors;
         public int awnings;
@@ -3679,6 +3917,14 @@ public static class HadanCityBuilder
                 start + right * halfWidth
             };
         }
+    }
+
+    class CarSlot
+    {
+        public Vector2 position;
+        public Vector2 direction;
+        public float angle;
+        public long seed;
     }
 
     readonly struct Placement
